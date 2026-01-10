@@ -1,5 +1,5 @@
-#include <bits/sockaddr.h>
 #include <stdlib.h>
+#include <sys/poll.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/socket.h>
@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <poll.h>
 
 #define LISTEN_PORT 8080
 #define BUF_SIZE 4096
@@ -18,6 +19,44 @@
 void error(const char *msg) {
 	perror(msg);
 	exit(1);
+}
+
+void bridge(int client_fd, int stream_fd){
+	struct pollfd fds[2];
+
+	// client pollfd
+	fds[0].fd = client_fd;
+	fds[0].events = POLLIN;
+
+	// server pollfd
+	fds[1].fd = stream_fd;
+	fds[1].events = POLLIN;
+
+	char buffer[BUF_SIZE];
+
+	while(1){
+		int r = poll(fds, 2, -1);
+		if (r<0) {
+			perror("polling error");
+			break;
+		}
+
+		// client -> stream
+		if (fds[0].revents & POLLIN) {
+			int n = read(client_fd, buffer, BUF_SIZE);
+			if (n<=0) break;
+			write(stream_fd, buffer, n);
+		}
+
+		// stream -> client
+		if (fds[1].revents &POLLIN) {
+			int n = read(stream_fd, buffer, BUF_SIZE);
+			if (n<=0) break;
+			write(client_fd, buffer, n);
+		}
+	}
+	close(client_fd);
+	close(stream_fd);
 }
 
 void handle_client(int client_fd) {
@@ -36,8 +75,7 @@ void handle_client(int client_fd) {
 		close(stream_fd);
 		return;
 	}
-	printf("connection to backend success");
-	//bridge(client_fd, stream_fd)
+	bridge(client_fd, stream_fd);
 }
 
 void handle_sigchld(int s) {
@@ -54,7 +92,6 @@ int main () {
 
 	// sockets
 	int server_sockfd, client_sockfd;
-	char buffer[BUF_SIZE];
 
 	server_sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_sockfd < 0) error ("Error opening listening socket");
