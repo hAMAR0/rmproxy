@@ -10,12 +10,34 @@
 #include <signal.h>
 #include <sys/wait.h>
 
-#define LISTEN_PORT 8000
+#define LISTEN_PORT 8080
 #define BUF_SIZE 4096
+#define T_ADDR "127.0.0.1"
+#define T_PORT 8000
 
 void error(const char *msg) {
 	perror(msg);
 	exit(1);
+}
+
+void handle_client(int client_fd) {
+	int stream_fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (stream_fd < 0) error("Error opening stream socket");
+
+	struct sockaddr_in target_addr = {
+		.sin_family = AF_INET,
+		.sin_port = htons(T_PORT)
+	};
+	if (inet_pton(AF_INET, T_ADDR, &target_addr.sin_addr) <= 0) error ("invalid stream address");
+
+	if (connect(stream_fd, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
+		perror("Connection to backend failed");
+		close(client_fd);
+		close(stream_fd);
+		return;
+	}
+	printf("connection to backend success");
+	//bridge(client_fd, stream_fd)
 }
 
 void handle_sigchld(int s) {
@@ -23,7 +45,7 @@ void handle_sigchld(int s) {
 }
 
 int main () {
-	// killing every children when they exit via sigaction
+	// killing every child when they exit via sigaction
 	struct sigaction sa = {
 		.sa_handler = handle_sigchld,
 		.sa_flags = SA_RESTART
@@ -67,7 +89,7 @@ int main () {
 				break;
 			case 0:
 				 close(server_sockfd);
-				 //handle_client();
+				 handle_client(client_sockfd);
 				 exit(0);
 			default:
 				 close(client_sockfd);
