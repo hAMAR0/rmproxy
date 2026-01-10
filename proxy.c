@@ -1,4 +1,3 @@
-#include <asm-generic/socket.h>
 #include <bits/sockaddr.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -8,6 +7,8 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/types.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 #define LISTEN_PORT 8000
 #define BUF_SIZE 4096
@@ -17,7 +18,19 @@ void error(const char *msg) {
 	exit(1);
 }
 
+void handle_sigchld(int s) {
+	while(waitpid(-1, NULL, WNOHANG) > 0);
+}
+
 int main () {
+	// killing every children when they exit via sigaction
+	struct sigaction sa = {
+		.sa_handler = handle_sigchld,
+		.sa_flags = SA_RESTART
+	};
+	sigaction(SIGCHLD, &sa, NULL);
+
+	// sockets
 	int server_sockfd, client_sockfd;
 	char buffer[BUF_SIZE];
 
@@ -38,13 +51,27 @@ int main () {
 	listen(server_sockfd, 128);
 	printf("Listening on port %d\n", LISTEN_PORT);
 
+	// main loop
 	struct sockaddr_in client_addr;
-	socklen_t client_len = sizeof(client_addr);
 	while (1) {
-		accept(client_sockfd, (struct sockaddr *)&client_addr, &client_len);
+		socklen_t client_len = sizeof(client_addr);
+		client_sockfd = accept(server_sockfd, (struct sockaddr *)&client_addr, &client_len);
 		if (client_sockfd < 0){ 
 			perror("Could not accept connection");
 			continue;
+		}
+		
+		switch(fork()) {
+			case -1: 
+			close(client_sockfd);
+				break;
+			case 0:
+				 close(server_sockfd);
+				 //handle_client();
+				 exit(0);
+			default:
+				 close(client_sockfd);
+				 break;
 		}
 	}
 }
