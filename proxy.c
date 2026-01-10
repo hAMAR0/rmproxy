@@ -33,9 +33,19 @@ int main () {
 		.sin_port = htons(LISTEN_PORT)
 	};
 
-	if (bind(server_sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) error("Couldnt bind socket");
+	if (bind(server_sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) error("Could not bind socket");
 
-	listen(client_sockfd, 128);
+	listen(server_sockfd, 128);
 	printf("Listening on port %d\n", LISTEN_PORT);
+
+	struct sockaddr_in client_addr;
+	socklen_t client_len = sizeof(client_addr);
+	while (1) {
+		accept(client_sockfd, (struct sockaddr *)&client_addr, &client_len);
+		if (client_sockfd < 0){ 
+			perror("Could not accept connection");
+			continue;
+		}
+	}
 }
 
