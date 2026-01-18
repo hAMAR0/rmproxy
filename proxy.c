@@ -10,8 +10,8 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <poll.h>
+#include "config.h"
 
-#define LISTEN_PORT 8080
 #define BUF_SIZE 4096
 #define T_ADDR "127.0.0.1"
 #define T_PORT 8000
@@ -83,6 +83,10 @@ void handle_sigchld(int s) {
 }
 
 int main () {
+	// parse cfg
+	pcfg cfg;
+	if (parse("./mrp.conf", &cfg) != 0) error("Could not load config, shutting down");
+
 	// killing every child when they exit via sigaction
 	struct sigaction sa = {
 		.sa_handler = handle_sigchld,
@@ -102,13 +106,13 @@ int main () {
 	struct sockaddr_in server_addr = {
 		.sin_family = AF_INET,
 		.sin_addr.s_addr = INADDR_ANY,
-		.sin_port = htons(LISTEN_PORT)
+		.sin_port = htons(cfg.port)
 	};
 
 	if (bind(server_sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) error("Could not bind socket");
 
 	listen(server_sockfd, 128);
-	printf("Listening on port %d\n", LISTEN_PORT);
+	printf("Listening on port %d\n", cfg.port);
 
 	// main loop
 	struct sockaddr_in client_addr;
