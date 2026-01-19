@@ -13,8 +13,8 @@
 #include "config.h"
 
 #define BUF_SIZE 4096
-#define T_ADDR "127.0.0.1"
-#define T_PORT 8000
+
+pcfg cfg; //config.h
 
 void error(const char *msg) {
 	perror(msg);
@@ -65,9 +65,9 @@ void handle_client(int client_fd) {
 
 	struct sockaddr_in target_addr = {
 		.sin_family = AF_INET,
-		.sin_port = htons(T_PORT)
+		.sin_port = htons(cfg.t_port)
 	};
-	if (inet_pton(AF_INET, T_ADDR, &target_addr.sin_addr) <= 0) error ("invalid stream address");
+	if (inet_pton(AF_INET, cfg.t_addr, &target_addr.sin_addr) <= 0) error ("invalid stream address");
 
 	if (connect(stream_fd, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
 		perror("Connection to backend failed");
@@ -83,8 +83,6 @@ void handle_sigchld(int s) {
 }
 
 int main () {
-	// parse cfg
-	pcfg cfg;
 	if (parse("./mrp.conf", &cfg) != 0) error("Could not load config, shutting down");
 
 	// killing every child when they exit via sigaction

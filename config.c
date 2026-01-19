@@ -34,6 +34,8 @@ int parse(const char *filename, pcfg* cfg) {
 			value = trim(delimeter+1);
 
 			if (strcmp(name, "port") == 0) cfg->port = atoi(value);
+			else if (strcmp(name, "t_port") == 0) cfg->t_port = atoi(value);
+			else if (strcmp(name, "t_addr") == 0) cfg->t_addr = value;
 		}
 	}
 
