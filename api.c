@@ -9,8 +9,8 @@ pcfg cfg;
 int main() {
 	parse("./mrp.conf", &cfg);
 
-	char *url = cfg.dc_url;
-	strcat(url, "/api/json");
+	char url[512]; 
+	snprintf(url, sizeof(url), "%s/api/json", cfg.dc_url);
 	
 	CURL *curl = curl_easy_init();
 	curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -21,10 +21,10 @@ int main() {
 
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_payload);
 
+	char url2[512];
+	snprintf(url2, sizeof(url2), "Referer: %s/api", cfg.dc_url);
+
 	struct curl_slist *headers = NULL;
-	char *url2 = "Referer: ";
-	strcat(url2, cfg.dc_url);
-	strcat(url2, "/api");
 	headers = curl_slist_append(headers, "Content-Type: application/json");
 	headers = curl_slist_append(headers, url2);
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -34,6 +34,7 @@ int main() {
 	CURLcode res = curl_easy_perform(curl);
 
 	if (res == CURLE_OK) printf("ok gj");
+	else printf("no");
 
 	curl_slist_free_all(headers);
 	curl_easy_cleanup(curl);
