@@ -10,7 +10,7 @@ int main() {
 	parse("./mrp.conf", &cfg);
 
 	char url[512]; 
-	snprintf(url, sizeof(url), "%s/api/json", cfg.dc_url);
+	snprintf(url, sizeof(url), "%s/ipa/json", cfg.dc_url);
 	
 	CURL *curl = curl_easy_init();
 	curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -22,7 +22,7 @@ int main() {
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_payload);
 
 	char url2[512];
-	snprintf(url2, sizeof(url2), "Referer: %s/api", cfg.dc_url);
+	snprintf(url2, sizeof(url2), "Referer: %s/ipa", cfg.dc_url);
 
 	struct curl_slist *headers = NULL;
 	headers = curl_slist_append(headers, "Content-Type: application/json");
