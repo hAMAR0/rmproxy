@@ -1,10 +1,12 @@
 #pragma once
+#include <parsec/parsec_mac.h>
 #include <stdint.h>
 #include <string.h>
+#include <parsec/parsec.h>
 
 typedef struct {
-        uint8_t min_lvl, max_lvl;
-        uint64_t min_cat, max_cat;
+        parsec_lev_t min_lvl, max_lvl;
+        parsec_cat_t min_cat, max_cat;
 } Labels;
 
 size_t get_response(void *ptr, size_t size, size_t nmemb, char *userp);

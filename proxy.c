@@ -10,6 +10,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <poll.h>
+#include <parsec/parsec_mac.h>
 #include "config.h"
 #include "api.h"
 
@@ -83,13 +84,31 @@ void handle_sigchld(int s) {
 	while(waitpid(-1, NULL, WNOHANG) > 0);
 }
 
-int main () {
-	if (parse("./mrp.conf", &cfg) != 0) error("Could not load config, shutting down");
-
-	// solely for testing, will remove later
+void change_identity() {
 	Labels mac_labels;
 	if (get_labels(&mac_labels) != 0) error("Could not get mac label from freeipa");
-	printf("min lvl - %hhd, max lvl - %hhd", mac_labels.min_lvl, mac_labels.max_lvl);
+	printf("min lvl - %hhd, max lvl - %hhd\n", mac_labels.min_lvl, mac_labels.max_lvl);
+	
+	struct _parsec_mac_t mac = {
+		.cat = mac_labels.min_cat,
+		.lev = mac_labels.min_cat,
+	};
+
+	struct _parsec_mac_label_t mlabel = {
+		.mac = mac,
+		.type = 0,
+
+	};
+
+
+	pid_t pid = getpid();
+
+	if (parsec_setmac(pid, &mac) != 0) error ("Could not set mac to child process, exiting...");
+}
+
+
+int main () {
+	if (parse("./mrp.conf", &cfg) != 0) error("Could not load config, shutting down");
 
 	// killing every child when they exit via sigaction
 	struct sigaction sa = {
@@ -134,6 +153,7 @@ int main () {
 				break;
 			case 0:
 				 close(server_sockfd);
+				 change_identity();
 				 handle_client(client_sockfd);
 				 exit(0);
 			default:
