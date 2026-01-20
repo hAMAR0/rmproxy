@@ -27,7 +27,7 @@ Labels get_mac_label(char *buffer) {
 	const char *mac_str = json_string_value(mac_str_obj);
 
 	
-	sscanf(mac_str, "%hhd:%llx:%hhd:%llx", &mac_label.min_lvl, &mac_label.min_cat, &mac_label.max_lvl, mac_label.max_cat);
+	sscanf(mac_str, "%hhd:%llx:%hhd:%llx", &mac_label.min_lvl, &mac_label.min_cat, &mac_label.max_lvl, &mac_label.max_cat);
 
 	json_decref(root);
 	return mac_label;
