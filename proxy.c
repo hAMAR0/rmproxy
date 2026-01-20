@@ -11,6 +11,7 @@
 #include <sys/wait.h>
 #include <poll.h>
 #include "config.h"
+#include "api.h"
 
 #define BUF_SIZE 4096
 
@@ -84,6 +85,11 @@ void handle_sigchld(int s) {
 
 int main () {
 	if (parse("./mrp.conf", &cfg) != 0) error("Could not load config, shutting down");
+
+	// solely for testing, will remove later
+	Labels mac_labels;
+	if (get_labels(&mac_labels) != 0) error("Could not get mac label from freeipa");
+	printf("min lvl - %hhd, max lvl - %hhd", mac_labels.min_lvl, mac_labels.max_lvl);
 
 	// killing every child when they exit via sigaction
 	struct sigaction sa = {

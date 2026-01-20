@@ -7,4 +7,6 @@ typedef struct {
 	char *dc_url;
 } pcfg;
 
+extern pcfg cfg;
+
 int parse(const char *filename, pcfg* cfg);
