@@ -13,6 +13,7 @@
 #include <parsec/parsec_mac.h>
 #include "config.h"
 #include "api.h"
+#include <gssapi/gssapi.h>
 
 #define BUF_SIZE 4096
 
@@ -91,7 +92,7 @@ void change_identity() {
 	
 	struct _parsec_mac_t mac = {
 		.cat = mac_labels.min_cat,
-		.lev = mac_labels.min_cat,
+		.lev = mac_labels.min_lvl,
 	};
 
 	struct _parsec_mac_label_t mlabel = {
