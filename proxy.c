@@ -155,10 +155,11 @@ int main () {
 				break;
 			case 0:
 				 close(server_sockfd);
+				 send_response(client_sockfd);
 				 http_read_header(client_sockfd);
-
+				
 				 change_identity();
-		//		 handle_client(client_sockfd);
+				 handle_client(client_sockfd);
 				 exit(0);
 			default:
 				 close(client_sockfd);

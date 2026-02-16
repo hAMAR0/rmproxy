@@ -23,3 +23,8 @@ int http_read_header(int fd) {
 	return 0;
 }
 
+int send_response(int fd) {
+	char response[] = "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Negotiate\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+	int n = write(fd, response, sizeof(response));
+	return 0;
+}
