@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include "http.h"
 
 int find_header_end(char *buf, int n) {
 	for (int i = 3; i < n; i++) {
@@ -18,5 +19,7 @@ int http_read_header(int fd) {
 	int n = read(fd, buf, sizeof(buf));
 	int end = find_header_end(buf, sizeof(buf));
 	//parse here
+	printf(buf);
+	return 0;
 }
 

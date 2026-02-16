@@ -11,9 +11,10 @@
 #include <sys/wait.h>
 #include <poll.h>
 #include <parsec/parsec_mac.h>
+#include <gssapi/gssapi.h>
 #include "config.h"
 #include "api.h"
-#include <gssapi/gssapi.h>
+#include "http.h"
 
 #define BUF_SIZE 4096
 
@@ -154,6 +155,8 @@ int main () {
 				break;
 			case 0:
 				 close(server_sockfd);
+				 http_read_header(client_sockfd);
+
 				 change_identity();
 		//		 handle_client(client_sockfd);
 				 exit(0);
