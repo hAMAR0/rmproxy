@@ -3,12 +3,16 @@
 #include <unistd.h>
 #include "http.h"
 
-void get_token(char* buf);
+int get_token(char* buf, char* ktoken);
 
-int http_read_header(int fd) {
+int http_read_header(int fd, char* dest_token) {
 	char buf[8192];
 	int n = read(fd, buf, sizeof(buf));
-	get_token(buf);
+
+	char token[4096];
+	if (get_token(buf, dest_token) != 0) {
+		printf("%s", "Could not get token");
+	}
 	return 0;
 }
 
@@ -18,7 +22,7 @@ int send_response(int fd) {
 	return 0;
 }
 
-void get_token(char* buf) {
+int get_token(char* buf, char* ktoken) {
 	char* line_end = strstr(buf, "\r\n");
 	char line[128];
 	int len = line_end - buf;
@@ -38,5 +42,6 @@ void get_token(char* buf) {
 	len = line_end - auth;
 	strncpy(token, auth, len);
 	token[len] = '\0';
-	printf("%s\n", token);
+	ktoken = token;
+	return 0;
 }

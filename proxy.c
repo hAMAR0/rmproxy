@@ -20,6 +20,9 @@
 
 pcfg cfg; //config.h
 
+
+void token_validation(int fd);
+
 void error(const char *msg) {
 	perror(msg);
 	exit(1);
@@ -155,8 +158,7 @@ int main () {
 				break;
 			case 0:
 				 close(server_sockfd);
-				 send_response(client_sockfd);
-				 http_read_header(client_sockfd);
+				 token_validation(client_sockfd);
 				 change_identity();
 				 handle_client(client_sockfd);
 				 exit(0);
@@ -165,5 +167,12 @@ int main () {
 				 break;
 		}
 	}
+}
+
+void token_validation(int fd) {
+	send_response(fd);
+
+	char token[4096];
+	http_read_header(fd, token);
 }
 

@@ -1,4 +1,4 @@
-int find_header_end(char *buf, int n);
-int http_read_header(int fd);
+int http_read_header(int fd, char* dest_token); 
+int get_token(char* buf, char* ktoken);
 int send_response(int fd);
 
