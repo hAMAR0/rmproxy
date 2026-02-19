@@ -170,9 +170,56 @@ int main () {
 }
 
 void token_validation(int fd) {
-	send_response(fd);
+	//send_response(fd);
 
-	char token[4096];
-	http_read_header(fd, token);
+	char token[8192];
+	int res = http_read_header(fd, token);
+	
+	if (!res) {
+		send_response(fd);
+		res = http_read_header(fd, token);
+	}	
+
+	char raw_token[8192];
+	int n = d_b64(token, raw_token);
+	if (n <= 0) error ("b64 failed");
+
+	gss_ctx_id_t context_hdl = GSS_C_NO_CONTEXT;
+	struct gss_buffer_desc_struct input_token = {
+		.length = n,
+		.value = raw_token
+	};
+	gss_buffer_desc output_token = GSS_C_EMPTY_BUFFER;
+	OM_uint32 maj_stat, min_stat, ret_flags;
+	gss_name_t client_name;
+
+	maj_stat = gss_accept_sec_context(
+			&min_stat, 
+			&context_hdl, 
+			GSS_C_NO_CREDENTIAL, 
+			&input_token, 
+			GSS_C_NO_CHANNEL_BINDINGS, 
+			&client_name, 
+			NULL, 
+			&output_token, 
+			&ret_flags, 
+			NULL, 
+			NULL
+		);
+	
+	// somewhere here send 200 OK with encoded output token header, probably in a cycle
+
+	//if (GSS_ERROR(maj_stat)) error("gssapi error");
+	
+	gss_buffer_desc name;
+
+	maj_stat = gss_display_name(&min_stat, client_name, &name, NULL);
+	if (maj_stat == GSS_S_COMPLETE) {
+		printf("%s", (char*)name.value);
+	}
+	else error("gss auth not complete");
+	gss_release_buffer(&min_stat, &name);
+	gss_release_name(&min_stat, &client_name);
+	gss_delete_sec_context(&min_stat, &context_hdl, GSS_C_NO_BUFFER);
 }
 

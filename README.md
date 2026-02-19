@@ -8,7 +8,7 @@ pdp (parsec)
 gssapi_krb5
 
 # Compile
-gcc proxy.c api.c config.c -o proxy -lcurl -ljansson -lpdp -lgssapi_krb5
+gcc proxy.c api.c http.c config.c -o proxy -lpdp -lgssapi_krb5 -ljansson -lcurl -lcrypto
 
 # Setting up
 sudo execaps -c 0x00004 ./proxy

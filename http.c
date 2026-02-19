@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
 #include "http.h"
 
 int get_token(char* buf, char* ktoken);
@@ -8,12 +10,14 @@ int get_token(char* buf, char* ktoken);
 int http_read_header(int fd, char* dest_token) {
 	char buf[8192];
 	int n = read(fd, buf, sizeof(buf));
+	if (n <= 0) return 0;
 
-	char token[4096];
+	char token[8192];
 	if (get_token(buf, dest_token) != 0) {
 		printf("%s", "Could not get token");
+		return 0;
 	}
-	return 0;
+	return 1;
 }
 
 int send_response(int fd) {
@@ -35,13 +39,24 @@ int get_token(char* buf, char* ktoken) {
 	printf("%s\n%s\n%s\n", method, route, protocol);
 
 
-	char token[4096];
 	char *auth = strstr(buf, "Authorization: Negotiate ");
 	auth+=25;
 	line_end = strstr(auth, "\r\n");
 	len = line_end - auth;
-	strncpy(token, auth, len);
-	token[len] = '\0';
-	ktoken = token;
+	strncpy(ktoken, auth, len);
+	ktoken[len] = '\0';
 	return 0;
+}
+
+int d_b64(const char* input, char* out) {
+	int len = strlen(input);
+
+	BIO *bio_mem = BIO_new_mem_buf((void*)input, -1);
+	BIO *bio_b64 = BIO_new(BIO_f_base64());
+	BIO_set_flags(bio_b64, BIO_FLAGS_BASE64_NO_NL);
+	bio_b64 = BIO_push(bio_b64, bio_mem);
+	int d_len = BIO_read(bio_b64, (void*)out, len);
+	BIO_free_all(bio_b64);
+
+	return d_len;
 }
