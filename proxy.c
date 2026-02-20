@@ -20,6 +20,8 @@
 
 pcfg cfg; //config.h
 
+static char prefetch_req[65536];
+static size_t prefetch_len = 0;
 
 int token_validation(int fd);
 
@@ -66,7 +68,7 @@ void bridge(int client_fd, int stream_fd){
 	close(stream_fd);
 }
 
-void handle_client(int client_fd) {
+void handle_client(int client_fd, const char* prefetch, size_t prefetch_size) {
 	int stream_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (stream_fd < 0) error("Error opening stream socket");
 
@@ -81,6 +83,17 @@ void handle_client(int client_fd) {
 		close(client_fd);
 		close(stream_fd);
 		return;
+	}
+
+	if (prefetch) {
+		ssize_t n = write(stream_fd, prefetch, prefetch_size);
+		fprintf(stderr, "prefetch head: %.*s\n", (int)(prefetch_size > 200 ? 200 : prefetch_size), prefetch);
+		if (n < 0) {
+			perror("error writing prefetch");
+			close(client_fd);
+			close(stream_fd);
+			return;
+		}
 	}
 	bridge(client_fd, stream_fd);
 }
@@ -157,18 +170,15 @@ int main () {
 			close(client_sockfd);
 				break;
 			case 0:
-				 close(server_sockfd);
-				 int n = token_validation(client_sockfd);
-				 if (n==0) {
-					close(client_sockfd);
-					exit(0);
-				 }
-				 change_identity();
-				 handle_client(client_sockfd);
-				 exit(0);
+				close(server_sockfd);
+				int n = token_validation(client_sockfd);
+				//change_identity();
+				//api sends garbage, fix or better use sssd cache instead
+				handle_client(client_sockfd, prefetch_req, prefetch_len);
+				exit(0);
 			default:
-				 close(client_sockfd);
-				 break;
+				close(client_sockfd);
+				break;
 		}
 	}
 }
@@ -247,11 +257,14 @@ int token_validation(int fd) {
 			gss_buffer_desc name = GSS_C_EMPTY_BUFFER;
 			OM_uint32 mj2 = gss_display_name(&min, client_name, &name, NULL);
 			if (mj2 != GSS_S_COMPLETE) {
-				fprintf(stderr, "gss_display_name failed mj2=0x%08x min=0x%08x\n", mj2, min);
 				break;
 			}
 
 			printf("user: %.*s\n", (int)name.length, (char*)name.value);
+			
+			if (req_len > sizeof(prefetch_req)) req_len = sizeof(prefetch_req);
+			memcpy(prefetch_req, req, req_len);
+			prefetch_len = req_len;
 
 			gss_release_buffer(&min, &name);
 			gss_release_name(&min, &client_name);
