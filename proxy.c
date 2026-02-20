@@ -21,7 +21,7 @@
 pcfg cfg; //config.h
 
 
-void token_validation(int fd);
+int token_validation(int fd);
 
 void error(const char *msg) {
 	perror(msg);
@@ -158,7 +158,11 @@ int main () {
 				break;
 			case 0:
 				 close(server_sockfd);
-				 token_validation(client_sockfd);
+				 int n = token_validation(client_sockfd);
+				 if (n==0) {
+					close(client_sockfd);
+					exit(0);
+				 }
 				 change_identity();
 				 handle_client(client_sockfd);
 				 exit(0);
@@ -169,57 +173,94 @@ int main () {
 	}
 }
 
-void token_validation(int fd) {
-	//send_response(fd);
+int token_validation(int fd) {
+	char req[65536];
+	size_t req_len = 0;
 
-	char token[8192];
-	int res = http_read_header(fd, token);
-	
-	if (!res) {
-		send_response(fd);
-		res = http_read_header(fd, token);
-	}	
+	char b64_in[16384];
+	char raw_in[16384];
 
-	char raw_token[8192];
-	int n = d_b64(token, raw_token);
-	if (n <= 0) error ("b64 failed");
+	gss_ctx_id_t ctx = GSS_C_NO_CONTEXT;
+	gss_name_t client_name = GSS_C_NO_NAME;
+	OM_uint32 maj = 0, min = 0, ret_flags = 0;
 
-	gss_ctx_id_t context_hdl = GSS_C_NO_CONTEXT;
-	struct gss_buffer_desc_struct input_token = {
-		.length = n,
-		.value = raw_token
-	};
-	gss_buffer_desc output_token = GSS_C_EMPTY_BUFFER;
-	OM_uint32 maj_stat, min_stat, ret_flags;
-	gss_name_t client_name;
+	while (1) {
+		if (!http_read_header(fd, req, sizeof(req), &req_len)) {
+			break;
+		}
 
-	maj_stat = gss_accept_sec_context(
-			&min_stat, 
-			&context_hdl, 
-			GSS_C_NO_CREDENTIAL, 
-			&input_token, 
-			GSS_C_NO_CHANNEL_BINDINGS, 
-			&client_name, 
-			NULL, 
-			&output_token, 
-			&ret_flags, 
-			NULL, 
+		int tok_res = http_extract_negotiate_token(req, req_len, b64_in, sizeof(b64_in));
+		if (tok_res == 0) {
+			http_send_401(fd, NULL);
+			continue;
+		}
+		if (tok_res < 0) {
+			http_send_401(fd, NULL);
+			break;
+		}
+
+		int in_len = d_b64(b64_in, raw_in, sizeof(raw_in));
+		if (in_len <= 0) {
+			http_send_401(fd, NULL);
+			break;
+		}
+
+		gss_buffer_desc input_tok = { .length = (size_t)in_len, .value = raw_in };
+		gss_buffer_desc output_tok = GSS_C_EMPTY_BUFFER;
+
+		maj = gss_accept_sec_context(
+			&min,
+			&ctx,
+			GSS_C_NO_CREDENTIAL,
+			&input_tok,
+			GSS_C_NO_CHANNEL_BINDINGS,
+			&client_name,
+			NULL,
+			&output_tok,
+			&ret_flags,
+			NULL,
 			NULL
 		);
-	
-	// somewhere here send 200 OK with encoded output token header, probably in a cycle
+			
+		if (GSS_ERROR(maj)) {
+			http_send_401(fd, NULL);
+			if (output_tok.length) gss_release_buffer(&min, &output_tok);
+			break;
+		}
 
-	//if (GSS_ERROR(maj_stat)) error("gssapi error");
-	
-	gss_buffer_desc name;
+		if (output_tok.length) {
+			char b64_out[32768];
+			int out_len = e_b64(output_tok.value, (int)output_tok.length, b64_out, sizeof(b64_out));
+			gss_release_buffer(&min, &output_tok);
 
-	maj_stat = gss_display_name(&min_stat, client_name, &name, NULL);
-	if (maj_stat == GSS_S_COMPLETE) {
-		printf("%s", (char*)name.value);
+			if (out_len > 0) {
+				if (maj & GSS_S_CONTINUE_NEEDED) {
+					http_send_401(fd, b64_out);
+					continue;
+				}
+			} else {
+				http_send_401(fd, NULL);
+				break;
+			}
+		}
+		if (!GSS_ERROR(maj) && !(maj & GSS_S_CONTINUE_NEEDED)) {
+			gss_buffer_desc name = GSS_C_EMPTY_BUFFER;
+			OM_uint32 mj2 = gss_display_name(&min, client_name, &name, NULL);
+			if (mj2 != GSS_S_COMPLETE) {
+				fprintf(stderr, "gss_display_name failed mj2=0x%08x min=0x%08x\n", mj2, min);
+				break;
+			}
+
+			printf("user: %.*s\n", (int)name.length, (char*)name.value);
+
+			gss_release_buffer(&min, &name);
+			gss_release_name(&min, &client_name);
+			gss_delete_sec_context(&min, &ctx, GSS_C_NO_BUFFER);
+			return 1;
+		}
 	}
-	else error("gss auth not complete");
-	gss_release_buffer(&min_stat, &name);
-	gss_release_name(&min_stat, &client_name);
-	gss_delete_sec_context(&min_stat, &context_hdl, GSS_C_NO_BUFFER);
-}
 
+	if (client_name != GSS_C_NO_NAME) gss_release_name(&min, &client_name);
+	if (ctx != GSS_C_NO_CONTEXT) gss_delete_sec_context(&min, &ctx, GSS_C_NO_BUFFER);
+	return 0;
+}
