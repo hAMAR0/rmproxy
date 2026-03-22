@@ -11,176 +11,21 @@
 #include <sys/wait.h>
 #include <poll.h>
 #include <parsec/parsec_mac.h>
-#include <gssapi/gssapi.h>
 #include "config.h"
-#include "api.h"
+#include "sssd.h"
+#include <gssapi/gssapi.h>
 #include "http.h"
 
 #define BUF_SIZE 4096
 
-pcfg cfg; //config.h
-
 static char prefetch_req[65536];
 static size_t prefetch_len = 0;
-
 int token_validation(int fd);
 
+pcfg cfg; //config.h
 void error(const char *msg) {
 	perror(msg);
 	exit(1);
-}
-
-void bridge(int client_fd, int stream_fd){
-	struct pollfd fds[2];
-
-	// client pollfd
-	fds[0].fd = client_fd;
-	fds[0].events = POLLIN;
-
-	// server pollfd
-	fds[1].fd = stream_fd;
-	fds[1].events = POLLIN;
-
-	char buffer[BUF_SIZE];
-
-	while(1){
-		int r = poll(fds, 2, -1);
-		if (r<0) {
-			perror("polling error");
-			break;
-		}
-
-		// client -> stream
-		if (fds[0].revents & POLLIN) {
-			int n = read(client_fd, buffer, BUF_SIZE);
-			if (n<=0) break;
-			write(stream_fd, buffer, n);
-		}
-
-		// stream -> client
-		if (fds[1].revents &POLLIN) {
-			int n = read(stream_fd, buffer, BUF_SIZE);
-			if (n<=0) break;
-			write(client_fd, buffer, n);
-		}
-	}
-	close(client_fd);
-	close(stream_fd);
-}
-
-void handle_client(int client_fd, const char* prefetch, size_t prefetch_size) {
-	int stream_fd = socket(AF_INET, SOCK_STREAM, 0);
-	if (stream_fd < 0) error("Error opening stream socket");
-
-	struct sockaddr_in target_addr = {
-		.sin_family = AF_INET,
-		.sin_port = htons(cfg.t_port)
-	};
-	if (inet_pton(AF_INET, cfg.t_addr, &target_addr.sin_addr) <= 0) error ("invalid stream address");
-
-	if (connect(stream_fd, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
-		perror("Connection to backend failed");
-		close(client_fd);
-		close(stream_fd);
-		return;
-	}
-
-	if (prefetch) {
-		ssize_t n = write(stream_fd, prefetch, prefetch_size);
-		fprintf(stderr, "prefetch head: %.*s\n", (int)(prefetch_size > 200 ? 200 : prefetch_size), prefetch);
-		if (n < 0) {
-			perror("error writing prefetch");
-			close(client_fd);
-			close(stream_fd);
-			return;
-		}
-	}
-	bridge(client_fd, stream_fd);
-}
-
-void handle_sigchld(int s) {
-	while(waitpid(-1, NULL, WNOHANG) > 0);
-}
-
-void change_identity() {
-	Labels mac_labels;
-	if (get_labels(&mac_labels) != 0) error("Could not get mac label from freeipa");
-	printf("min lvl - %hhd, max lvl - %hhd\n", mac_labels.min_lvl, mac_labels.max_lvl);
-	
-	struct _parsec_mac_t mac = {
-		.cat = mac_labels.min_cat,
-		.lev = mac_labels.min_lvl,
-	};
-
-	struct _parsec_mac_label_t mlabel = {
-		.mac = mac,
-		.type = 0,
-
-	};
-
-
-	pid_t pid = getpid();
-
-	if (parsec_setmac(pid, &mac) != 0) error ("Could not set mac to child process, exiting...");
-}
-
-
-int main () {
-	if (parse("./mrp.conf", &cfg) != 0) error("Could not load config, shutting down");
-
-	// killing every child when they exit via sigaction
-	struct sigaction sa = {
-		.sa_handler = handle_sigchld,
-		.sa_flags = SA_RESTART
-	};
-	sigaction(SIGCHLD, &sa, NULL);
-
-	// sockets
-	int server_sockfd, client_sockfd;
-
-	server_sockfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (server_sockfd < 0) error ("Error opening listening socket");
-
-	int opt = 1;
-	setsockopt(server_sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-	struct sockaddr_in server_addr = {
-		.sin_family = AF_INET,
-		.sin_addr.s_addr = INADDR_ANY,
-		.sin_port = htons(cfg.port)
-	};
-
-	if (bind(server_sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) error("Could not bind socket");
-
-	listen(server_sockfd, 128);
-	printf("Listening on port %d\n", cfg.port);
-
-	// main loop
-	struct sockaddr_in client_addr;
-	while (1) {
-		socklen_t client_len = sizeof(client_addr);
-		client_sockfd = accept(server_sockfd, (struct sockaddr *)&client_addr, &client_len);
-		if (client_sockfd < 0){ 
-			perror("Could not accept connection");
-			continue;
-		}
-		
-		switch(fork()) {
-			case -1: 
-			close(client_sockfd);
-				break;
-			case 0:
-				close(server_sockfd);
-				int n = token_validation(client_sockfd);
-				//change_identity();
-				//api sends garbage, fix or better use sssd cache instead
-				handle_client(client_sockfd, prefetch_req, prefetch_len);
-				exit(0);
-			default:
-				close(client_sockfd);
-				break;
-		}
-	}
 }
 
 int token_validation(int fd) {
@@ -261,7 +106,9 @@ int token_validation(int fd) {
 			}
 
 			printf("user: %.*s\n", (int)name.length, (char*)name.value);
-			
+//			strncpy((char*)name.value, uname, name.length);
+//			((char*)name.value)[name.length] = '\0';
+
 			if (req_len > sizeof(prefetch_req)) req_len = sizeof(prefetch_req);
 			memcpy(prefetch_req, req, req_len);
 			prefetch_len = req_len;
@@ -276,4 +123,161 @@ int token_validation(int fd) {
 	if (client_name != GSS_C_NO_NAME) gss_release_name(&min, &client_name);
 	if (ctx != GSS_C_NO_CONTEXT) gss_delete_sec_context(&min, &ctx, GSS_C_NO_BUFFER);
 	return 0;
+}
+
+void bridge(int client_fd, int stream_fd){
+	struct pollfd fds[2];
+
+	// client pollfd
+	fds[0].fd = client_fd;
+	fds[0].events = POLLIN;
+
+	// server pollfd
+	fds[1].fd = stream_fd;
+	fds[1].events = POLLIN;
+
+	char buffer[BUF_SIZE];
+
+	while(1){
+		int r = poll(fds, 2, -1);
+		if (r<0) {
+			perror("polling error");
+			break;
+		}
+
+		// client -> stream
+		if (fds[0].revents & POLLIN) {
+			int n = read(client_fd, buffer, BUF_SIZE);
+			if (n<=0) break;
+			write(stream_fd, buffer, n);
+		}
+
+		// stream -> client
+		if (fds[1].revents &POLLIN) {
+			int n = read(stream_fd, buffer, BUF_SIZE);
+			if (n<=0) break;
+			write(client_fd, buffer, n);
+		}
+	}
+	close(client_fd);
+	close(stream_fd);
+}
+
+void handle_client(int client_fd, const char* prefetch, size_t prefetch_size) {
+	int stream_fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (stream_fd < 0) error("Error opening stream socket");
+
+	struct sockaddr_in target_addr = {
+		.sin_family = AF_INET,
+		.sin_port = htons(cfg.t_port)
+	};
+	if (inet_pton(AF_INET, cfg.t_addr, &target_addr.sin_addr) <= 0) error ("invalid stream address");
+
+	if (connect(stream_fd, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
+		perror("Connection to backend failed");
+		close(client_fd);
+		close(stream_fd);
+		return;
+	}
+
+	if (prefetch) {
+		ssize_t n = write(stream_fd, prefetch, prefetch_size);
+		if (n < 0) {
+			perror("error writing prefetch");
+			close(client_fd);
+			close(stream_fd);
+			return;
+		}
+	}
+	bridge(client_fd, stream_fd);
+}
+
+void handle_sigchld(int s) {
+	while(waitpid(-1, NULL, WNOHANG) > 0);
+}
+
+void change_identity(char* uname) {
+	typedef struct {
+        	parsec_lev_t min_lvl, max_lvl;
+        	parsec_cat_t min_cat, max_cat;
+	} Labels;
+
+	Labels mac_labels;
+	
+	char* mac_str = get_mac_label(uname);
+	sscanf(mac_str, "%hhd:%llx:%hhd:%llx", mac_labels.min_lvl, mac_labels.min_cat, mac_labels.max_lvl, mac_labels.max_cat);
+
+	struct _parsec_mac_t mac = {
+		.cat = mac_labels.min_cat,
+		.lev = mac_labels.min_lvl,
+	};
+
+	struct _parsec_mac_label_t mlabel = {
+		.mac = mac,
+		.type = 0,
+
+	};
+
+
+	pid_t pid = getpid();
+
+	if (parsec_setmac(pid, &mac) != 0) error ("Could not set mac to child process, exiting...");
+}
+
+
+int main () {
+	if (parse("./mrp.conf", &cfg) != 0) error("Could not load config, shutting down");
+
+	// killing every child when they exit via sigaction
+	struct sigaction sa = {
+		.sa_handler = handle_sigchld,
+		.sa_flags = SA_RESTART
+	};
+	sigaction(SIGCHLD, &sa, NULL);
+
+	// sockets
+	int server_sockfd, client_sockfd;
+
+	server_sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (server_sockfd < 0) error ("Error opening listening socket");
+
+	int opt = 1;
+	setsockopt(server_sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+	struct sockaddr_in server_addr = {
+		.sin_family = AF_INET,
+		.sin_addr.s_addr = INADDR_ANY,
+		.sin_port = htons(cfg.port)
+	};
+
+	if (bind(server_sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) error("Could not bind socket");
+
+	listen(server_sockfd, 128);
+	printf("Listening on port %d\n", cfg.port);
+
+	// main loop
+	struct sockaddr_in client_addr;
+	while (1) {
+		socklen_t client_len = sizeof(client_addr);
+		client_sockfd = accept(server_sockfd, (struct sockaddr *)&client_addr, &client_len);
+		if (client_sockfd < 0){ 
+			perror("Could not accept connection");
+			continue;
+		}
+		
+		switch(fork()) {
+			case -1: 
+			close(client_sockfd);
+				break;
+			case 0:
+				close(server_sockfd);
+				int n = token_validation(client_sockfd);
+//				change_identity(uname);
+				handle_client(client_sockfd, prefetch_req, prefetch_len);
+				exit(0);
+			default:
+				close(client_sockfd);
+				break;
+		}
+	}
 }
