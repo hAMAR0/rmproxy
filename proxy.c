@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <string.h>
 #include <sys/poll.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -11,6 +12,7 @@
 #include <sys/wait.h>
 #include <poll.h>
 #include <parsec/parsec_mac.h>
+#include <parsec/mac.h>
 #include "config.h"
 #include "sssd.h"
 #include <gssapi/gssapi.h>
@@ -20,7 +22,6 @@
 
 static char prefetch_req[65536];
 static size_t prefetch_len = 0;
-int token_validation(int fd);
 
 pcfg cfg; //config.h
 void error(const char *msg) {
@@ -28,9 +29,10 @@ void error(const char *msg) {
 	exit(1);
 }
 
-int token_validation(int fd) {
+int token_validation(int fd, char* out_name, char* fqdn) {
 	char req[65536];
 	size_t req_len = 0;
+	char host[512];
 
 	char b64_in[16384];
 	char raw_in[16384];
@@ -43,6 +45,11 @@ int token_validation(int fd) {
 		if (!http_read_header(fd, req, sizeof(req), &req_len)) {
 			break;
 		}
+		
+		if (http_get_host(req, host, sizeof(host))) {
+			strcpy(fqdn, host);
+		}
+
 
 		int tok_res = http_extract_negotiate_token(req, req_len, b64_in, sizeof(b64_in));
 		if (tok_res == 0) {
@@ -105,9 +112,8 @@ int token_validation(int fd) {
 				break;
 			}
 
-			printf("user: %.*s\n", (int)name.length, (char*)name.value);
-//			strncpy((char*)name.value, uname, name.length);
-//			((char*)name.value)[name.length] = '\0';
+			strcpy(out_name, (char*)name.value);
+			out_name[(int)name.length] = '\0';
 
 			if (req_len > sizeof(prefetch_req)) req_len = sizeof(prefetch_req);
 			memcpy(prefetch_req, req, req_len);
@@ -196,32 +202,57 @@ void handle_sigchld(int s) {
 	while(waitpid(-1, NULL, WNOHANG) > 0);
 }
 
-void change_identity(char* uname) {
+void change_identity(char* uname, char* fqdn) {
 	typedef struct {
         	parsec_lev_t min_lvl, max_lvl;
         	parsec_cat_t min_cat, max_cat;
 	} Labels;
 
-	Labels mac_labels;
+	Labels mac_labels_user, mac_labels_host;
 	
-	char* mac_str = get_mac_label(uname);
-	sscanf(mac_str, "%hhd:%llx:%hhd:%llx", mac_labels.min_lvl, mac_labels.min_cat, mac_labels.max_lvl, mac_labels.max_cat);
+	char* mac_str_user = get_sssd_attr(uname, "x-ald-user-mac");
+	//sscanf(mac_str_user, "%hhd:%llx:%hhd:%llx", &mac_labels_user.min_lvl, &mac_labels_user.min_cat, &mac_labels_user.max_lvl, &mac_labels_user.max_cat);
+	
+	//TODO: somehow get host custom attributes to compare with user attr, sssd doesnt work so probably use ldap to cache host attributes on proxy startup
+	
 
-	struct _parsec_mac_t mac = {
-		.cat = mac_labels.min_cat,
-		.lev = mac_labels.min_lvl,
+	char* mac_str_host;
+	printf("%s and %s\n", mac_str_host, mac_str_user);
+	struct _parsec_mac_t mac_user = {
+		.cat = mac_labels_user.min_cat,
+		.lev = mac_labels_user.min_lvl,
 	};
 
-	struct _parsec_mac_label_t mlabel = {
-		.mac = mac,
-		.type = 0,
-
+	struct _parsec_mac_t mac_host = {
+		.cat = mac_labels_host.min_cat,
+		.lev = mac_labels_host.min_lvl,
 	};
+/*
+	mac_t user_mac = mac_init(MAC_TYPE_SUBJECT);
+	mac_t host_mac = mac_init(MAC_TYPE_SUBJECT);
+	
+	if (mac_from_text(user_mac, mac_str_user) < 0) error ("Could not set user mac");
+	if (mac_from_text(host_mac, mac_str_host) < 0) error ("Could not set host mac");
 
-
+	switch(mac_cmp(user_mac, host_mac)){
+		case -2:
+			error("mac labels are not comparable");
+			break;
+		case -1:
+			printf("user mac < host mac");
+			break;
+		case 0:
+			printf("user mac = host mac");
+			break;
+		case 1:
+			printf("user mac > host mac");
+			break;
+	}
+*/
 	pid_t pid = getpid();
 
-	if (parsec_setmac(pid, &mac) != 0) error ("Could not set mac to child process, exiting...");
+	if (parsec_setmac(pid, &mac_user) != 0) error ("Could not set mac to child process, exiting...");
+//	else printf("success");
 }
 
 
@@ -271,8 +302,11 @@ int main () {
 				break;
 			case 0:
 				close(server_sockfd);
-				int n = token_validation(client_sockfd);
-//				change_identity(uname);
+				char uname[512];
+				char fqdn[512];
+				int n = token_validation(client_sockfd, uname, fqdn);
+//				printf("%s on %s\n", uname, fqdn);
+				change_identity(uname, fqdn);
 				handle_client(client_sockfd, prefetch_req, prefetch_len);
 				exit(0);
 			default:

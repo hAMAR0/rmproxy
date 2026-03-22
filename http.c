@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -5,7 +6,6 @@
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
 #include "http.h"
-
 
 int get_token(char* buf, char* ktoken);
 
@@ -54,6 +54,24 @@ int http_send_401(int fd, const char* b64tok) {
 	write(fd,response, n);
 
 	return 1;
+}
+int http_get_host(const char *headers, char *out, size_t max_len) {
+    const char *p = strcasestr(headers, "Host:");
+    if (!p) return 0;
+    p += 5; 
+    while (*p == ' ' || *p == '\t') p++;
+
+    size_t i = 0;
+    while (p[i] != '\r' && p[i] != '\n' && p[i] != ':' && p[i] != '\0') {
+        if (i < max_len - 1) {
+            out[i] = p[i];
+            i++;
+        } else {
+            break;
+        }
+    }
+    out[i] = '\0';
+    return (i > 0);
 }
 
 int http_extract_negotiate_token(const char* headers, size_t headers_len, char* out_tok, size_t out_tok_sz) {

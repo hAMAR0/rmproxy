@@ -2,11 +2,11 @@
 #include <systemd/sd-bus.h>
 #include "sssd.h"
 
-char* get_mac_label(const char* username) {
+char* get_sssd_attr(const char* name, const char* attr_name) {
     sd_bus *bus = NULL;
     sd_bus_message *m = NULL, *reply = NULL;
     char *result = NULL;
-    const char *attrs[] = {"x-ald-user-mac", NULL};
+    const char *attrs[] = {attr_name, NULL};
 
     if (sd_bus_open_system(&bus) < 0) return NULL;
 
@@ -16,7 +16,7 @@ char* get_mac_label(const char* username) {
                                        "org.freedesktop.sssd.infopipe",
                                        "GetUserAttr") < 0) goto finish;
 
-    sd_bus_message_append(m, "s", username);
+    sd_bus_message_append(m, "s", name);
     sd_bus_message_append_strv(m, (char **)attrs); 
 
     if (sd_bus_call(bus, m, 0, NULL, &reply) < 0) goto finish;
@@ -24,10 +24,10 @@ char* get_mac_label(const char* username) {
     if (sd_bus_message_enter_container(reply, 'a', "{sv}") < 0) goto finish;
 
     while (sd_bus_message_enter_container(reply, 'e', "sv") > 0) {
-        const char *attr_name;
-        sd_bus_message_read(reply, "s", &attr_name);
+        const char *ret_attr_name;
+        sd_bus_message_read(reply, "s", &ret_attr_name);
 
-        if (strcmp(attr_name, "x-ald-user-mac") == 0) {
+        if (strcmp(ret_attr_name, attr_name) == 0) {
             const char *attr_value;
             if (sd_bus_message_enter_container(reply, 'v', "as") >= 0 &&
                 sd_bus_message_enter_container(reply, 'a', "s") >= 0 &&

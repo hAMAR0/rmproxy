@@ -1,1 +1,1 @@
-char* get_mac_label(const char *username);
+char* get_sssd_attr(const char* name, const char* attr_name);
