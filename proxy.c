@@ -202,34 +202,18 @@ void handle_sigchld(int s) {
 	while(waitpid(-1, NULL, WNOHANG) > 0);
 }
 
-void change_identity(char* uname, char* fqdn) {
-	typedef struct {
-        	parsec_lev_t min_lvl, max_lvl;
-        	parsec_cat_t min_cat, max_cat;
-	} Labels;
-
-	Labels mac_labels_user, mac_labels_host;
-	
+void change_identity(char* uname, char* fqdn, int clientsock_fd) {
 	char* mac_str_user = get_sssd_attr(uname, "x-ald-user-mac");
-	//sscanf(mac_str_user, "%hhd:%llx:%hhd:%llx", &mac_labels_user.min_lvl, &mac_labels_user.min_cat, &mac_labels_user.max_lvl, &mac_labels_user.max_cat);
-	
-	//TODO: somehow get host custom attributes to compare with user attr, sssd doesnt work so probably use ldap to cache host attributes on proxy startup
-	
-
 	char* mac_str_host;
-	printf("%s and %s\n", mac_str_host, mac_str_user);
-	struct _parsec_mac_t mac_user = {
-		.cat = mac_labels_user.min_cat,
-		.lev = mac_labels_user.min_lvl,
-	};
+	ldap_get_host_mac(mac_str_host);
 
-	struct _parsec_mac_t mac_host = {
-		.cat = mac_labels_host.min_cat,
-		.lev = mac_labels_host.min_lvl,
-	};
-/*
+	//TODO: ldap_get_host_mac() is much slower than getting values from sssd cache, should implement caching every host on proxy startup, but it will work for now;
+	
+	printf("%s and %s\n", mac_str_host, mac_str_user);
+
+	// TODO: doesnt work, check definitions & fix
 	mac_t user_mac = mac_init(MAC_TYPE_SUBJECT);
-	mac_t host_mac = mac_init(MAC_TYPE_SUBJECT);
+	mac_t host_mac = mac_init(MAC_TYPE_SUBJECT); 
 	
 	if (mac_from_text(user_mac, mac_str_user) < 0) error ("Could not set user mac");
 	if (mac_from_text(host_mac, mac_str_host) < 0) error ("Could not set host mac");
@@ -243,16 +227,16 @@ void change_identity(char* uname, char* fqdn) {
 			break;
 		case 0:
 			printf("user mac = host mac");
+			pid_t pid = getpid();
+			if (mac_set_pid(pid, user_mac) != 0) {
+				error ("Could not set mac to child process");
+			}
+			handle_client(clientsock_fd, prefetch_req, prefetch_len);
 			break;
 		case 1:
 			printf("user mac > host mac");
 			break;
 	}
-*/
-	pid_t pid = getpid();
-
-	if (parsec_setmac(pid, &mac_user) != 0) error ("Could not set mac to child process, exiting...");
-//	else printf("success");
 }
 
 
@@ -304,10 +288,9 @@ int main () {
 				close(server_sockfd);
 				char uname[512];
 				char fqdn[512];
-				int n = token_validation(client_sockfd, uname, fqdn);
-//				printf("%s on %s\n", uname, fqdn);
-				change_identity(uname, fqdn);
-				handle_client(client_sockfd, prefetch_req, prefetch_len);
+				token_validation(client_sockfd, uname, fqdn);
+				printf("\n"); // segfaults without this line
+				change_identity(uname, fqdn, client_sockfd);
 				exit(0);
 			default:
 				close(client_sockfd);

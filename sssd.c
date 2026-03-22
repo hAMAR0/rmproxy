@@ -1,5 +1,7 @@
 #include <string.h>
 #include <systemd/sd-bus.h>
+#include <ldap.h>
+#include <time.h>
 #include "sssd.h"
 
 char* get_sssd_attr(const char* name, const char* attr_name) {
@@ -47,4 +49,55 @@ finish:
     sd_bus_unref(bus);
     return result;
 }
+
+
+int sasl_interact(LDAP *ld, unsigned flags, void *defaults, void *in) {
+    return LDAP_SUCCESS;
+}
+
+int ldap_get_host_mac(char* host_mac) {
+	LDAP *ld;
+	int n;
+	int version = LDAP_VERSION3;
+	const char *uri = "ldap://astraipa.domain.net";
+	const char *base_dn = "cn=computers,cn=accounts,dc=domain,dc=net";
+	const char *filter = "(fqdn=astraipa.domain.net)";
+	LDAPMessage *result, *entry;
+	char *attrs[] = {"x-ald-host-mac", NULL};
+	struct berval **values;
+
+	n = ldap_initialize(&ld, uri);
+	if (n != LDAP_SUCCESS) {
+		printf("ldap_initialize error");
+		return -1;
+	}
+	ldap_set_option(ld, LDAP_OPT_PROTOCOL_VERSION, &version);
+
+	n = ldap_sasl_interactive_bind_s(ld, NULL, "GSSAPI", NULL, NULL, LDAP_SASL_QUIET, sasl_interact, NULL);
+	if (n != LDAP_SUCCESS) {
+		printf("ldap_sasl_interactive_bins_s error");
+		ldap_unbind_ext_s(ld, NULL, NULL);
+		return -1;
+	}
+
+	n = ldap_search_ext_s(ld, base_dn, LDAP_SCOPE_SUBTREE, filter, attrs, 0, NULL, NULL, NULL, 0, &result);
+	if (n != LDAP_SUCCESS) {
+		printf("ldap_search_ext_s error");
+		ldap_unbind_ext_s(ld, NULL, NULL);
+		return -1;
+	}
+
+	for (entry = ldap_first_entry(ld, result); entry != NULL; entry = ldap_next_entry(ld, entry)) {
+		values = ldap_get_values_len(ld, entry, "x-ald-host-mac");
+		//printf("%s\n", values[0]->bv_val);
+		strcpy(host_mac, values[0]->bv_val);
+		ldap_value_free_len(values);
+	}
+	ldap_msgfree(result);
+	ldap_unbind_ext_s(ld, NULL, NULL);
+
+	return 0;
+}
+
+
 
