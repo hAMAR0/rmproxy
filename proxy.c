@@ -202,27 +202,54 @@ void handle_sigchld(int s) {
 	while(waitpid(-1, NULL, WNOHANG) > 0);
 }
 
+int get_mac_part(char* input, char* min, char* max) {
+	char* col1 = strchr(input, ':');
+	char* col2 = strchr(col1+1, ':');
+	if (col2) {
+		int len1 = col2 - input;
+		strncpy(min, input, len1);
+		min[len1] = '\0';
+		strcpy(max, col2+1);
+		return 1;
+	}
+	return 0;
+}
+
 void change_identity(char* uname, char* fqdn, int clientsock_fd) {
 	char* mac_str_user = get_sssd_attr(uname, "x-ald-user-mac");
-	char* mac_str_host;
+	char mac_str_host[32];
 	ldap_get_host_mac(mac_str_host);
 
 	//TODO: ldap_get_host_mac() is much slower than getting values from sssd cache, should implement caching every host on proxy startup, but it will work for now;
-	
-	printf("%s and %s\n", mac_str_host, mac_str_user);
 
-	// TODO: doesnt work, check definitions & fix
+	char mac_str_user_min[16], mac_str_user_max[16], mac_str_host_min[16], mac_str_host_max[16];
+
+	if (get_mac_part(mac_str_user, mac_str_user_min, mac_str_user_max) == 0) {
+		error("Could not parse minmax mac");
+	}
+
+	if (get_mac_part(mac_str_host, mac_str_host_min, mac_str_host_max) == 0) {
+		error("Could not parse minmax mac");
+	}
+
+	printf("%s min %s max\n", mac_str_user_min, mac_str_user_max);
+	printf("%s min %s max\n", mac_str_host_min, mac_str_host_max);
+
 	mac_t user_mac = mac_init(MAC_TYPE_SUBJECT);
 	mac_t host_mac = mac_init(MAC_TYPE_SUBJECT); 
 	
-	if (mac_from_text(user_mac, mac_str_user) < 0) error ("Could not set user mac");
-	if (mac_from_text(host_mac, mac_str_host) < 0) error ("Could not set host mac");
+	if (mac_from_text(user_mac, mac_str_user_min) < 0) error ("Could not set user mac");
+	if (mac_from_text(host_mac, mac_str_host_min) < 0) error ("Could not set host mac");
 
 	switch(mac_cmp(user_mac, host_mac)){
 		case -2:
+			mac_free(user_mac);
+			mac_free(host_mac);
 			error("mac labels are not comparable");
 			break;
 		case -1:
+			mac_free(user_mac);
+			mac_free(host_mac);
 			printf("user mac < host mac");
 			break;
 		case 0:
@@ -234,7 +261,14 @@ void change_identity(char* uname, char* fqdn, int clientsock_fd) {
 			handle_client(clientsock_fd, prefetch_req, prefetch_len);
 			break;
 		case 1:
+			mac_free(user_mac);
+			mac_free(host_mac);
 			printf("user mac > host mac");
+			break;
+		default:
+			mac_free(user_mac);
+			mac_free(host_mac);
+			printf("some other error");
 			break;
 	}
 }
