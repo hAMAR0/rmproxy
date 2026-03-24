@@ -224,23 +224,16 @@ void change_identity(char* uname, char* fqdn, int clientsock_fd) {
 
 	char mac_str_user_min[16], mac_str_user_max[16], mac_str_host_min[16], mac_str_host_max[16];
 
-	if (get_mac_part(mac_str_user, mac_str_user_min, mac_str_user_max) == 0) {
+	if (get_mac_part(mac_str_user, mac_str_user_min, mac_str_user_max) == 0 || get_mac_part(mac_str_host, mac_str_host_min, mac_str_host_max) == 0) {
 		error("Could not parse minmax mac");
 	}
-
-	if (get_mac_part(mac_str_host, mac_str_host_min, mac_str_host_max) == 0) {
-		error("Could not parse minmax mac");
-	}
-
-	printf("%s min %s max\n", mac_str_user_min, mac_str_user_max);
-	printf("%s min %s max\n", mac_str_host_min, mac_str_host_max);
 
 	mac_t user_mac = mac_init(MAC_TYPE_SUBJECT);
 	mac_t host_mac = mac_init(MAC_TYPE_SUBJECT); 
 	
-	if (mac_from_text(user_mac, mac_str_user_min) < 0) error ("Could not set user mac");
-	if (mac_from_text(host_mac, mac_str_host_min) < 0) error ("Could not set host mac");
+	if (mac_from_text(user_mac, mac_str_user_min) < 0 || mac_from_text(host_mac, mac_str_host_min) < 0) error ("Could not set user mac");
 
+	pid_t pid = getpid();
 	switch(mac_cmp(user_mac, host_mac)){
 		case -2:
 			mac_free(user_mac);
@@ -254,16 +247,19 @@ void change_identity(char* uname, char* fqdn, int clientsock_fd) {
 			break;
 		case 0:
 			printf("user mac = host mac");
-			pid_t pid = getpid();
 			if (mac_set_pid(pid, user_mac) != 0) {
 				error ("Could not set mac to child process");
 			}
 			handle_client(clientsock_fd, prefetch_req, prefetch_len);
-			break;
-		case 1:
 			mac_free(user_mac);
 			mac_free(host_mac);
+
+			break;
+		case 1:
 			printf("user mac > host mac");
+			handle_client(clientsock_fd, prefetch_req, prefetch_len);
+			mac_free(user_mac);
+			mac_free(host_mac);
 			break;
 		default:
 			mac_free(user_mac);
@@ -323,7 +319,6 @@ int main () {
 				char uname[512];
 				char fqdn[512];
 				token_validation(client_sockfd, uname, fqdn);
-				printf("\n"); // segfaults without this line
 				change_identity(uname, fqdn, client_sockfd);
 				exit(0);
 			default:

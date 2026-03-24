@@ -3,6 +3,7 @@
 #include <ldap.h>
 #include <time.h>
 #include "sssd.h"
+#include "config.h"
 
 char* get_sssd_attr(const char* name, const char* attr_name) {
     sd_bus *bus = NULL;
@@ -59,12 +60,16 @@ int ldap_get_host_mac(char* host_mac) {
 	LDAP *ld;
 	int n;
 	int version = LDAP_VERSION3;
-	const char *uri = "ldap://astraipa.domain.net";
+	char uri[128]; // = "ldap://astraipa.domain.net";
 	const char *base_dn = "cn=computers,cn=accounts,dc=domain,dc=net";
-	const char *filter = "(fqdn=astraipa.domain.net)";
+	char filter[150]; // = "(fqdn=astraipa.domain.net)";
 	LDAPMessage *result, *entry;
 	char *attrs[] = {"x-ald-host-mac", NULL};
 	struct berval **values;
+	
+	if (parse("./mrp.conf", &cfg) != 0) perror("Could not load config, shutting down");
+	snprintf(uri, sizeof(uri), "ldap://%s", cfg.dc_url);
+	snprintf(filter, sizeof(filter), "(fqdn=%s)", cfg.dc_url);
 
 	n = ldap_initialize(&ld, uri);
 	if (n != LDAP_SUCCESS) {
@@ -89,7 +94,6 @@ int ldap_get_host_mac(char* host_mac) {
 
 	for (entry = ldap_first_entry(ld, result); entry != NULL; entry = ldap_next_entry(ld, entry)) {
 		values = ldap_get_values_len(ld, entry, "x-ald-host-mac");
-		//printf("%s\n", values[0]->bv_val);
 		strcpy(host_mac, values[0]->bv_val);
 		ldap_value_free_len(values);
 	}
@@ -98,6 +102,3 @@ int ldap_get_host_mac(char* host_mac) {
 
 	return 0;
 }
-
-
-

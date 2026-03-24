@@ -22,7 +22,10 @@ char* trim(char *str) {
 int parse(const char *filename, pcfg* cfg) {
 	char buffer[CONF_BUF_LEN];
 	FILE *pf = fopen(filename, "r");
-
+	if (!pf) {
+        	perror("Error opening config file");
+        	return -1;
+    	}
 	while(fgets(buffer, sizeof(buffer), pf)) {
 		char *name;
 		char *value;
