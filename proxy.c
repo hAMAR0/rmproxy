@@ -11,11 +11,17 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <poll.h>
+
 #include <parsec/parsec_mac.h>
 #include <parsec/mac.h>
+
+#include <gssapi/gssapi.h>
+
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 #include "config.h"
 #include "sssd.h"
-#include <gssapi/gssapi.h>
 #include "http.h"
 
 #define BUF_SIZE 4096
@@ -29,7 +35,7 @@ void error(const char *msg) {
 	exit(1);
 }
 
-int token_validation(int fd, char* out_name, char* fqdn) {
+int token_validation(SSL *ssl, char* out_name, char* fqdn) {
 	char req[65536];
 	size_t req_len = 0;
 	char host[512];
@@ -42,7 +48,7 @@ int token_validation(int fd, char* out_name, char* fqdn) {
 	OM_uint32 maj = 0, min = 0, ret_flags = 0;
 
 	while (1) {
-		if (!http_read_header(fd, req, sizeof(req), &req_len)) {
+		if (!http_read_header(ssl, req, sizeof(req), &req_len)) {
 			break;
 		}
 		
@@ -53,17 +59,17 @@ int token_validation(int fd, char* out_name, char* fqdn) {
 
 		int tok_res = http_extract_negotiate_token(req, req_len, b64_in, sizeof(b64_in));
 		if (tok_res == 0) {
-			http_send_401(fd, NULL);
+			http_send_401(ssl, NULL);
 			continue;
 		}
 		if (tok_res < 0) {
-			http_send_401(fd, NULL);
+			http_send_401(ssl, NULL);
 			break;
 		}
 
 		int in_len = d_b64(b64_in, raw_in, sizeof(raw_in));
 		if (in_len <= 0) {
-			http_send_401(fd, NULL);
+			http_send_401(ssl, NULL);
 			break;
 		}
 
@@ -85,7 +91,7 @@ int token_validation(int fd, char* out_name, char* fqdn) {
 		);
 			
 		if (GSS_ERROR(maj)) {
-			http_send_401(fd, NULL);
+			http_send_401(ssl, NULL);
 			if (output_tok.length) gss_release_buffer(&min, &output_tok);
 			break;
 		}
@@ -97,11 +103,11 @@ int token_validation(int fd, char* out_name, char* fqdn) {
 
 			if (out_len > 0) {
 				if (maj & GSS_S_CONTINUE_NEEDED) {
-					http_send_401(fd, b64_out);
+					http_send_401(ssl, b64_out);
 					continue;
 				}
 			} else {
-				http_send_401(fd, NULL);
+				http_send_401(ssl, NULL);
 				break;
 			}
 		}
@@ -131,7 +137,8 @@ int token_validation(int fd, char* out_name, char* fqdn) {
 	return 0;
 }
 
-void bridge(int client_fd, int stream_fd){
+void bridge(SSL *ssl, int stream_fd) {
+	int client_fd = SSL_get_fd(ssl);
 	struct pollfd fds[2];
 
 	// client pollfd
@@ -145,15 +152,23 @@ void bridge(int client_fd, int stream_fd){
 	char buffer[BUF_SIZE];
 
 	while(1){
-		int r = poll(fds, 2, -1);
+		int r;
+		if (SSL_pending(ssl) > 0) {
+			r = 1;
+			fds[0].revents = POLLIN;
+			fds[1].revents = 0;
+		}
+		else {
+			r = poll(fds, 2, -1);
+		}
+	
 		if (r<0) {
 			perror("polling error");
 			break;
 		}
-
 		// client -> stream
-		if (fds[0].revents & POLLIN) {
-			int n = read(client_fd, buffer, BUF_SIZE);
+		if (fds[0].revents & POLLIN || SSL_pending(ssl) > 0) {
+			int n = SSL_read(ssl, buffer, BUF_SIZE);
 			if (n<=0) break;
 			write(stream_fd, buffer, n);
 		}
@@ -162,14 +177,13 @@ void bridge(int client_fd, int stream_fd){
 		if (fds[1].revents &POLLIN) {
 			int n = read(stream_fd, buffer, BUF_SIZE);
 			if (n<=0) break;
-			write(client_fd, buffer, n);
+			SSL_write(ssl, buffer, n);
 		}
 	}
-	close(client_fd);
 	close(stream_fd);
 }
 
-void handle_client(int client_fd, const char* prefetch, size_t prefetch_size) {
+void handle_client(SSL *ssl, const char* prefetch, size_t prefetch_size) {
 	int stream_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (stream_fd < 0) error("Error opening stream socket");
 
@@ -181,7 +195,6 @@ void handle_client(int client_fd, const char* prefetch, size_t prefetch_size) {
 
 	if (connect(stream_fd, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
 		perror("Connection to backend failed");
-		close(client_fd);
 		close(stream_fd);
 		return;
 	}
@@ -190,12 +203,11 @@ void handle_client(int client_fd, const char* prefetch, size_t prefetch_size) {
 		ssize_t n = write(stream_fd, prefetch, prefetch_size);
 		if (n < 0) {
 			perror("error writing prefetch");
-			close(client_fd);
 			close(stream_fd);
 			return;
 		}
 	}
-	bridge(client_fd, stream_fd);
+	bridge(ssl, stream_fd);
 }
 
 void handle_sigchld(int s) {
@@ -215,7 +227,7 @@ int get_mac_part(char* input, char* min, char* max) {
 	return 0;
 }
 
-void change_identity(char* uname, char* fqdn, int clientsock_fd) {
+void change_identity(char* uname, char* fqdn, SSL *ssl) {
 	char* mac_str_user = get_sssd_attr(uname, "x-ald-user-mac");
 	char mac_str_host[32];
 	ldap_get_host_mac(mac_str_host);
@@ -250,14 +262,14 @@ void change_identity(char* uname, char* fqdn, int clientsock_fd) {
 			if (mac_set_pid(pid, user_mac) != 0) {
 				error ("Could not set mac to child process");
 			}
-			handle_client(clientsock_fd, prefetch_req, prefetch_len);
+			handle_client(ssl, prefetch_req, prefetch_len);
 			mac_free(user_mac);
 			mac_free(host_mac);
 
 			break;
 		case 1:
 			printf("user mac > host mac");
-			handle_client(clientsock_fd, prefetch_req, prefetch_len);
+			handle_client(ssl, prefetch_req, prefetch_len);
 			mac_free(user_mac);
 			mac_free(host_mac);
 			break;
@@ -271,6 +283,30 @@ void change_identity(char* uname, char* fqdn, int clientsock_fd) {
 
 
 int main () {
+	// init ssl
+	SSL_CTX *ctx;
+	ctx = SSL_CTX_new(TLS_server_method());
+	if (ctx == NULL) {
+		error("Failed to create server ssl_ctx");
+	}
+	if (!SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION)) {
+		SSL_CTX_free(ctx);
+		error("Failed to set minimum TLS protocol version");
+	}
+
+	uint32_t opts = 0;
+	opts = SSL_OP_IGNORE_UNEXPECTED_EOF;
+	opts |= SSL_OP_NO_RENEGOTIATION;
+	opts |= SSL_OP_CIPHER_SERVER_PREFERENCE;
+	SSL_CTX_set_options(ctx, opts);
+
+	//TODO: move cert path to cfg
+	if (SSL_CTX_use_certificate_file(ctx, "./cert/cert.pem", SSL_FILETYPE_PEM) < 1 || SSL_CTX_use_PrivateKey_file(ctx, "./cert/key.pem", SSL_FILETYPE_PEM) < 1) {
+		SSL_CTX_free(ctx);
+		error("Failed to load certificates");
+	}
+
+
 	if (parse("./mrp.conf", &cfg) != 0) error("Could not load config, shutting down");
 
 	// killing every child when they exit via sigaction
@@ -302,6 +338,7 @@ int main () {
 
 	// main loop
 	struct sockaddr_in client_addr;
+	
 	while (1) {
 		socklen_t client_len = sizeof(client_addr);
 		client_sockfd = accept(server_sockfd, (struct sockaddr *)&client_addr, &client_len);
@@ -309,17 +346,30 @@ int main () {
 			perror("Could not accept connection");
 			continue;
 		}
+	
 		
 		switch(fork()) {
-			case -1: 
+			case -1:
 			close(client_sockfd);
 				break;
 			case 0:
 				close(server_sockfd);
+				
+				SSL *ssl = SSL_new(ctx);
+				SSL_set_fd(ssl, client_sockfd);
+				if (SSL_accept(ssl) <= 0) {
+					ERR_print_errors_fp(stderr);
+					SSL_shutdown(ssl);
+					SSL_free(ssl);
+					close(client_sockfd);
+					exit(1);
+				}
+				
+
 				char uname[512];
 				char fqdn[512];
-				token_validation(client_sockfd, uname, fqdn);
-				change_identity(uname, fqdn, client_sockfd);
+				token_validation(ssl, uname, fqdn);
+				change_identity(uname, fqdn, ssl);
 				exit(0);
 			default:
 				close(client_sockfd);

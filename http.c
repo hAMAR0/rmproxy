@@ -9,12 +9,12 @@
 
 int get_token(char* buf, char* ktoken);
 
-int http_read_header(int fd, char* buf, size_t buf_size, size_t* output_len) {
+int http_read_header(SSL *ssl, char* buf, size_t buf_size, size_t* output_len) {
 	if (!buf) return 0;
 	*output_len = 0;
 
 	while (*output_len + 1 < buf_size) {
-		ssize_t n = read(fd, buf + *output_len, buf_size - 1 - *output_len);
+		int n = SSL_read(ssl, buf + *output_len, buf_size - 1 - *output_len);
 		if (n <= 0) return 0;
 		*output_len += n;
 		buf[*output_len] = '\0';
@@ -25,7 +25,7 @@ int http_read_header(int fd, char* buf, size_t buf_size, size_t* output_len) {
 	return 0;
 }
 
-int http_send_401(int fd, const char* b64tok) {
+int http_send_401(SSL *ssl, const char* b64tok) {
 	char response[16384];
 	int n;
 
@@ -51,7 +51,7 @@ int http_send_401(int fd, const char* b64tok) {
 
 	if (n <= 0) return 0;
 
-	write(fd,response, n);
+	if (SSL_write(ssl, response, n) <= 0) return 0;
 
 	return 1;
 }
