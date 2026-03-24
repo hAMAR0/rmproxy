@@ -227,23 +227,36 @@ int get_mac_part(char* input, char* min, char* max) {
 	return 0;
 }
 
-void change_identity(char* uname, char* fqdn, SSL *ssl) {
+void change_identity(char* uname, char* fqdn, SSL *ssl, char* clienthost) {
 	char* mac_str_user = get_sssd_attr(uname, "x-ald-user-mac");
 	char mac_str_host[32];
-	ldap_get_host_mac(mac_str_host);
 
-	//TODO: ldap_get_host_mac() is much slower than getting values from sssd cache, should implement caching every host on proxy startup, but it will work for now;
+	char host_srv_fqdn[256] = {0};
+	strcpy(host_srv_fqdn, cfg.dc_url);
+	ldap_get_host_mac(host_srv_fqdn, mac_str_host);
 
-	char mac_str_user_min[16], mac_str_user_max[16], mac_str_host_min[16], mac_str_host_max[16];
+	char mac_str_userhost[32];
+	ldap_get_host_mac(clienthost, mac_str_userhost);
 
-	if (get_mac_part(mac_str_user, mac_str_user_min, mac_str_user_max) == 0 || get_mac_part(mac_str_host, mac_str_host_min, mac_str_host_max) == 0) {
+	//TODO: ldap_get_host_mac() is much slower than getting values from sssd cache, USE JWT;
+
+	char mac_str_user_min[16], mac_str_user_max[16], mac_str_host_min[16], mac_str_host_max[16], mac_str_userhost_min[16], mac_str_userhost_max[16];
+	
+	if (get_mac_part(mac_str_user, mac_str_user_min, mac_str_user_max) == 0 || get_mac_part(mac_str_host, mac_str_host_min, mac_str_host_max) == 0 || get_mac_part(mac_str_userhost, mac_str_userhost_min, mac_str_userhost_max) == 0) {
 		error("Could not parse minmax mac");
 	}
+	printf("user %s\nhost %s\nuserhost %s\n", mac_str_user, mac_str_host, mac_str_userhost);
 
-	mac_t user_mac = mac_init(MAC_TYPE_SUBJECT);
-	mac_t host_mac = mac_init(MAC_TYPE_SUBJECT); 
+	mac_t userhost_mac = mac_init(MAC_TYPE_SUBJECT); // user machine fqdn
+	mac_t user_mac = mac_init(MAC_TYPE_SUBJECT); // user
+	mac_t host_mac = mac_init(MAC_TYPE_SUBJECT); // requested destination fqdn
 	
-	if (mac_from_text(user_mac, mac_str_user_min) < 0 || mac_from_text(host_mac, mac_str_host_min) < 0) error ("Could not set user mac");
+	if (mac_from_text(user_mac, mac_str_user_min) < 0 || mac_from_text(host_mac, mac_str_host_min) < 0 || mac_from_text(userhost_mac, mac_str_userhost_min)) error ("Could not set user mac");
+
+	if(mac_cmp(user_mac, userhost_mac) != 0) {
+		printf("User tried accessing website with MAC level stronger/lower than the logged in machine\n");
+		return;
+	}
 
 	pid_t pid = getpid();
 	switch(mac_cmp(user_mac, host_mac)){
@@ -255,10 +268,10 @@ void change_identity(char* uname, char* fqdn, SSL *ssl) {
 		case -1:
 			mac_free(user_mac);
 			mac_free(host_mac);
-			printf("user mac < host mac");
+			printf("user mac < host mac\n");
 			break;
 		case 0:
-			printf("user mac = host mac");
+			printf("user mac = host mac\n");
 			if (mac_set_pid(pid, user_mac) != 0) {
 				error ("Could not set mac to child process");
 			}
@@ -268,7 +281,7 @@ void change_identity(char* uname, char* fqdn, SSL *ssl) {
 
 			break;
 		case 1:
-			printf("user mac > host mac");
+			printf("user mac > host mac\n");
 			handle_client(ssl, prefetch_req, prefetch_len);
 			mac_free(user_mac);
 			mac_free(host_mac);
@@ -337,8 +350,7 @@ int main () {
 	printf("Listening on port %d\n", cfg.port);
 
 	// main loop
-	struct sockaddr_in client_addr;
-	
+	struct sockaddr_in client_addr;	
 	while (1) {
 		socklen_t client_len = sizeof(client_addr);
 		client_sockfd = accept(server_sockfd, (struct sockaddr *)&client_addr, &client_len);
@@ -346,7 +358,8 @@ int main () {
 			perror("Could not accept connection");
 			continue;
 		}
-	
+		
+		char clienthost[1024];
 		
 		switch(fork()) {
 			case -1:
@@ -355,6 +368,11 @@ int main () {
 			case 0:
 				close(server_sockfd);
 				
+				if (getnameinfo((struct sockaddr *)&client_addr, sizeof(client_addr), clienthost, sizeof(clienthost), NULL, 0, 0) != 0) {
+					error("Could not get user fqdn");
+				}
+				printf("FQDN of the user machine: %s\n", clienthost);
+
 				SSL *ssl = SSL_new(ctx);
 				SSL_set_fd(ssl, client_sockfd);
 				if (SSL_accept(ssl) <= 0) {
@@ -369,7 +387,7 @@ int main () {
 				char uname[512];
 				char fqdn[512];
 				token_validation(ssl, uname, fqdn);
-				change_identity(uname, fqdn, ssl);
+				change_identity(uname, fqdn, ssl, clienthost);
 				exit(0);
 			default:
 				close(client_sockfd);

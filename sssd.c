@@ -56,7 +56,7 @@ int sasl_interact(LDAP *ld, unsigned flags, void *defaults, void *in) {
     return LDAP_SUCCESS;
 }
 
-int ldap_get_host_mac(char* host_mac) {
+int ldap_get_host_mac(char* hostname, char* host_mac) {
 	LDAP *ld;
 	int n;
 	int version = LDAP_VERSION3;
@@ -67,9 +67,8 @@ int ldap_get_host_mac(char* host_mac) {
 	char *attrs[] = {"x-ald-host-mac", NULL};
 	struct berval **values;
 	
-	if (parse("./mrp.conf", &cfg) != 0) perror("Could not load config, shutting down");
-	snprintf(uri, sizeof(uri), "ldap://%s", cfg.dc_url);
-	snprintf(filter, sizeof(filter), "(fqdn=%s)", cfg.dc_url);
+	snprintf(uri, sizeof(uri), "ldap://%s", hostname);
+	snprintf(filter, sizeof(filter), "(fqdn=%s)", hostname);
 
 	n = ldap_initialize(&ld, uri);
 	if (n != LDAP_SUCCESS) {

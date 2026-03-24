@@ -1,3 +1,4 @@
+#include <stddef.h>
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
@@ -5,6 +6,7 @@
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
+#include <openssl/hmac.h>
 #include "http.h"
 
 int get_token(char* buf, char* ktoken);
@@ -147,4 +149,16 @@ int e_b64(const void* input, int input_len, char* out, size_t out_sz) {
 	int out_len = (int)bptr->length;
 	BIO_free_all(bio_b64);
 	return out_len;
+}
+
+
+#define JWT_SECRET "rmproxysecret"
+
+int create_signature(char* data, char* out_b64, size_t out_sz) {
+	unsigned char hash[32];
+	unsigned int len;
+
+	HMAC(EVP_sha256(), JWT_SECRET, strlen(JWT_SECRET), (unsigned char*)data, strlen(data), hash, &len);
+
+	return e_b64(hash, len, out_b64, out_sz);
 }
