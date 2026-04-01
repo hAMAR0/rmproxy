@@ -7,3 +7,4 @@ int http_extract_negotiate_token(const char* headers, size_t headers_len, char* 
 int http_get_host(const char *headers, char *out, size_t max_len);
 int d_b64(const char* input, char* out, size_t out_sz);
 int e_b64(const void* input, int input_len, char* out, size_t out_sz);
+int create_jwt(char* payload, char* jwt);

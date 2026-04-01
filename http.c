@@ -162,3 +162,47 @@ int create_signature(char* data, char* out_b64, size_t out_sz) {
 
 	return e_b64(hash, len, out_b64, out_sz);
 }
+
+void wrapper(char* b64_data, int b64_sz) {
+	for (int i = 0; i < b64_sz; i++) {
+		switch (b64_data[i]) {
+			case '+':
+				b64_data[i] = '-';
+				break;
+			case '/':
+				b64_data[i] = '_';
+				break;
+			case '=':
+				b64_data[i] = '\0';
+				break;
+			default:
+			break;
+		}
+	}
+}
+
+int create_jwt(char* payload, char* jwt) {
+	char b64_data[128];
+	int b64_sz = 128;
+	
+	char output[256];
+
+	char* header = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"; //default jwt header hardcoded
+
+	e_b64(payload, strlen(payload), b64_data, b64_sz);
+	wrapper(b64_data, b64_sz);
+	
+	snprintf(output, sizeof(output), "%s.%s", header, b64_data);
+	printf("%s\n", output);
+	
+	char b64d[128];
+	int b64s = 128;
+	int n = create_signature(output, b64d, b64s);
+	wrapper(b64d, b64s);
+	
+	char out[512];
+	snprintf(out, sizeof(out), "%s.%s", output, b64d);
+	strcpy(jwt, out);
+
+	return 1;
+}
