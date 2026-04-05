@@ -8,7 +8,6 @@
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
 #include <openssl/hmac.h>
-#include <time.h>
 #include "http.h"
 
 int get_token(char* buf, char* ktoken);

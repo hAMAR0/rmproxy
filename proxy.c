@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <poll.h>
+#include <time.h>
 
 #include <parsec/parsec_mac.h>
 #include <parsec/mac.h>
@@ -35,7 +36,7 @@ void error(const char *msg) {
 	exit(1);
 }
 
-int token_validation(SSL *ssl, char* out_name, char* fqdn) {
+int token_validation(SSL *ssl, char* out_name, char* fqdn, char* jwt_tok) {
 	char req[65536];
 	size_t req_len = 0;
 	char host[512];
@@ -59,6 +60,7 @@ int token_validation(SSL *ssl, char* out_name, char* fqdn) {
 		// check for jwt here
 		char jwt[1024];
 		if (http_extract_jwt_cookie(req, jwt, sizeof(jwt))) {
+			memcpy(jwt_tok, jwt, sizeof(jwt));
 			if (check_jwt(jwt)) {
 				memcpy(prefetch_req, req, req_len);
 				prefetch_len = req_len;
@@ -237,7 +239,7 @@ int get_mac_part(char* input, char* min, char* max) {
 	return 0;
 }
 
-void change_identity(char* uname, char* fqdn, SSL *ssl, char* clienthost) {
+void change_identity(char* uname, char* fqdn, SSL *ssl, char* clienthost, char* jwt_tok) {
 	char* mac_str_user = get_sssd_attr(uname, "x-ald-user-mac");
 	char mac_str_host[32];
 
@@ -304,6 +306,84 @@ void change_identity(char* uname, char* fqdn, SSL *ssl, char* clienthost) {
 	}
 }
 
+
+int payload_gen(char* uname, char* payload, char* client_hostname, char* target_fqdn) {
+	char* mac_str_user = get_sssd_attr(uname, "x-ald-user-mac");
+	char mac_str_host[32];
+
+	char host_srv_fqdn[256] = {0};
+	strcpy(host_srv_fqdn, cfg.dc_url);
+	ldap_get_host_mac(host_srv_fqdn, mac_str_host);
+
+	char mac_str_userhost[32];
+	ldap_get_host_mac(client_hostname, mac_str_userhost);
+
+	char mac_str_user_min[16], mac_str_user_max[16], mac_str_host_min[16], mac_str_host_max[16], mac_str_userhost_min[16], mac_str_userhost_max[16];
+	
+	if (get_mac_part(mac_str_user, mac_str_user_min, mac_str_user_max) == 0 || get_mac_part(mac_str_host, mac_str_host_min, mac_str_host_max) == 0 || get_mac_part(mac_str_userhost, mac_str_userhost_min, mac_str_userhost_max) == 0) {
+		error("Could not parse minmax mac");
+	}
+
+	mac_t userhost_mac = mac_init(MAC_TYPE_SUBJECT); // user machine fqdn
+	mac_t user_mac = mac_init(MAC_TYPE_SUBJECT); // user
+	mac_t host_mac = mac_init(MAC_TYPE_SUBJECT); // requested targer fqdn
+	
+	if (mac_from_text(user_mac, mac_str_user_min) < 0 || mac_from_text(host_mac, mac_str_host_min) < 0 || mac_from_text(userhost_mac, mac_str_userhost_min)) error ("Could not set user mac");
+
+	mac_t min_user_mac;
+	switch (mac_cmp(user_mac, userhost_mac)) {
+		case -1:
+		case 0:
+			min_user_mac = user_mac;
+			mac_free(userhost_mac);
+			break;
+		case 1:
+			min_user_mac = userhost_mac;
+			mac_free(user_mac);
+			break;
+		default:
+			mac_free(userhost_mac);
+			mac_free(user_mac);
+			mac_free(userhost_mac);
+			break;
+	}
+
+	char has_access = 0;
+
+	switch(mac_cmp(min_user_mac, host_mac)){
+		case -2:
+			mac_free(min_user_mac);
+			mac_free(host_mac);
+			error("mac labels are not comparable");
+			break;
+		case -1:
+			mac_free(min_user_mac);
+			mac_free(host_mac);
+			break;
+		case 0:
+			has_access = 1;
+			mac_free(min_user_mac);
+			mac_free(host_mac);
+
+			break;
+		case 1:
+			has_access = 1;
+			mac_free(min_user_mac);
+			mac_free(host_mac);
+			break;
+		default:
+			mac_free(min_user_mac);
+			mac_free(host_mac);
+			break;
+	}
+	long exp = time(NULL) + 12*3600;
+	char jwt[1024];
+	snprintf(jwt, sizeof(jwt), "{\"uname\":\"%s\",\"has_access\":%d,\"exp\":%ld}", uname, has_access, exp);
+	
+	strcpy(payload, jwt);
+	
+	return 1;
+}
 
 int main () {
 	// init ssl
@@ -396,15 +476,18 @@ int main () {
 
 				char uname[512];
 				char fqdn[512];
-				int auth = token_validation(ssl, uname, fqdn);
 				char jwt[1024];
+				char payload[1024];
+				
+				int auth = token_validation(ssl, uname, fqdn, jwt);
 				switch (auth) {
 					case 0:
 						error("faild to kerb auth");
 						break;
 					case 1:
 						printf("generating jwt");
-						if (create_jwt(uname, jwt)) {
+						payload_gen(uname, payload, clienthost, fqdn);
+						if (create_jwt(payload, jwt)) {
 							http_send_jwt_redirect(ssl, jwt, "/");
 						}
 						SSL_shutdown(ssl);
@@ -414,9 +497,8 @@ int main () {
 						break;
 					case 2:
 						printf("already had jwt");
-						change_identity(uname, fqdn, ssl, clienthost);
-						// TODO: создавать нормальный payload, хранящий uname, has_access, возможно мандатку, время. 
-						// пофиксить все это, ибо сейчас подключение не происходит.
+						handle_client(ssl, prefetch_req, prefetch_len);
+						//change_identity(uname, fqdn, ssl, clienthost, jwt);
 						break;
 					default:
 						break;
