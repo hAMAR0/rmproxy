@@ -56,6 +56,16 @@ int token_validation(SSL *ssl, char* out_name, char* fqdn) {
 			strcpy(fqdn, host);
 		}
 
+		// check for jwt here
+		char jwt[1024];
+		if (http_extract_jwt_cookie(req, jwt, sizeof(jwt))) {
+			if (check_jwt(jwt)) {
+				memcpy(prefetch_req, req, req_len);
+				prefetch_len = req_len;
+				return 2;
+			}
+		}
+
 
 		int tok_res = http_extract_negotiate_token(req, req_len, b64_in, sizeof(b64_in));
 		if (tok_res == 0) {
@@ -386,8 +396,32 @@ int main () {
 
 				char uname[512];
 				char fqdn[512];
-				token_validation(ssl, uname, fqdn);
-				change_identity(uname, fqdn, ssl, clienthost);
+				int auth = token_validation(ssl, uname, fqdn);
+				char jwt[1024];
+				switch (auth) {
+					case 0:
+						error("faild to kerb auth");
+						break;
+					case 1:
+						printf("generating jwt");
+						if (create_jwt(uname, jwt)) {
+							http_send_jwt_redirect(ssl, jwt, "/");
+						}
+						SSL_shutdown(ssl);
+						SSL_free(ssl);
+						close(client_sockfd);
+						exit(1);
+						break;
+					case 2:
+						printf("already had jwt");
+						change_identity(uname, fqdn, ssl, clienthost);
+						// TODO: создавать нормальный payload, хранящий uname, has_access, возможно мандатку, время. 
+						// пофиксить все это, ибо сейчас подключение не происходит.
+						break;
+					default:
+						break;
+				}
+
 				exit(0);
 			default:
 				close(client_sockfd);

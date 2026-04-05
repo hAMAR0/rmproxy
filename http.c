@@ -8,6 +8,7 @@
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
 #include <openssl/hmac.h>
+#include <time.h>
 #include "http.h"
 
 int get_token(char* buf, char* ktoken);
@@ -219,7 +220,6 @@ int create_jwt(char* payload, char* jwt) {
 	wrapper(b64_data, nn);
 	
 	snprintf(output, sizeof(output), "%s.%s", header, b64_data);
-	printf("%s\n", output);
 	
 	char b64d[256];
 	int b64s = sizeof(b64d);
@@ -228,7 +228,7 @@ int create_jwt(char* payload, char* jwt) {
 	
 	char out[512];
 	snprintf(out, sizeof(out), "%s.%s", output, b64d);
-	snprintf(jwt, sizeof(jwt), "%s", out);
+	snprintf(jwt, sizeof(out), "%s", out);
 
 	return 1;
 }
@@ -243,4 +243,30 @@ int check_jwt(char* jwt) {
 	wrapper(outpd, sig_n);
 
 	return CRYPTO_memcmp(outpd, signature, strlen(signature)) == 0;
+}
+
+int http_extract_jwt_cookie(const char* headers, char* out, size_t out_sz) {
+	const char* p = strcasestr(headers, "Cookie:");
+	if (!p) return 0;
+	p = strstr(p, "jwt=");
+	if (!p) return 0;
+	p += 4;
+	const char* end = strpbrk(p, ";\r\n");
+	size_t len = end ? (size_t)(end - p) : strlen(p);
+	if (len == 0 || len + 1 > out_sz) return 0;
+	memcpy(out, p, len);
+	out[len] = '\0';
+	return 1;
+}
+
+void http_send_jwt_redirect(SSL* ssl, const char* jwt, const char* location) {
+	char response[1024];
+	int n = snprintf(response, sizeof(response),
+		"HTTP/1.1 302 Found\r\n"
+		"Location: %s\r\n"
+		"Set-Cookie: jwt=%s; HttpOnly; Secure; SameSite=Strict; Path=/\r\n"
+		"Content-Length: 0\r\n"
+		"Connection: close\r\n\r\n",
+		location, jwt);
+	if (n > 0) SSL_write(ssl, response, n);
 }

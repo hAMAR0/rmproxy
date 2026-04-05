@@ -9,3 +9,5 @@ int d_b64(const char* input, char* out, size_t out_sz);
 int e_b64(const void* input, int input_len, char* out, size_t out_sz);
 int create_jwt(char* payload, char* jwt);
 int check_jwt(char* jwt);
+void http_send_jwt_redirect(SSL* ssl, const char* jwt, const char* location);
+int http_extract_jwt_cookie(const char* headers, char* out, size_t out_sz);
