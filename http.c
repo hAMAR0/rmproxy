@@ -1,5 +1,6 @@
-#include <stddef.h>
 #define _GNU_SOURCE
+#include <openssl/crypto.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -181,28 +182,65 @@ void wrapper(char* b64_data, int b64_sz) {
 	}
 }
 
+void unwrapper(char* b64_data, int b64_sz, char* out_b, int out_s) {
+	if (out_s < b64_sz + 4) return;
+
+	for (int i = 0; i < b64_sz; i++) {
+		switch (b64_data[i]) {
+			case '-':
+				out_b[i] = '+';
+				break;
+			case '_':
+				out_b[i] = '/';
+				break;
+			default:
+				out_b[i] = b64_data[i];
+				break;
+		}
+	}
+
+	int pad = 4 - (b64_sz % 4);
+	if (pad == 4) pad = 0;
+	for (int i = 0; i < pad; i++) {
+		out_b[b64_sz+i] = '=';
+	}
+	out_b[b64_sz + pad] = '\0';
+}
+
 int create_jwt(char* payload, char* jwt) {
-	char b64_data[128];
-	int b64_sz = 128;
+	char b64_data[256];
+	int b64_sz = sizeof(b64_data);
 	
-	char output[256];
+	char output[512];
 
 	char* header = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"; //default jwt header hardcoded
 
-	e_b64(payload, strlen(payload), b64_data, b64_sz);
-	wrapper(b64_data, b64_sz);
+	int nn = e_b64(payload, strlen(payload), b64_data, b64_sz);
+	wrapper(b64_data, nn);
 	
 	snprintf(output, sizeof(output), "%s.%s", header, b64_data);
 	printf("%s\n", output);
 	
-	char b64d[128];
-	int b64s = 128;
+	char b64d[256];
+	int b64s = sizeof(b64d);
 	int n = create_signature(output, b64d, b64s);
-	wrapper(b64d, b64s);
+	wrapper(b64d, n);
 	
 	char out[512];
 	snprintf(out, sizeof(out), "%s.%s", output, b64d);
-	strcpy(jwt, out);
+	snprintf(jwt, sizeof(jwt), "%s", out);
 
 	return 1;
+}
+
+int check_jwt(char* jwt) {
+	char header[128], payload[256], signature[256];
+	sscanf(jwt, "%127[^.].%127[^.].%127[^.]", header, payload, signature);
+
+	char outp[256], outpd[256];
+	snprintf(outp, sizeof(outp), "%s.%s", header, payload);
+	int sig_n = create_signature(outp, outpd, sizeof(outpd));
+	wrapper(outpd, sig_n);
+
+	return CRYPTO_memcmp(outpd, signature, strlen(signature)) == 0;
 }
