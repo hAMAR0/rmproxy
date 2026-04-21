@@ -11,3 +11,12 @@ int create_jwt(char* payload, char* jwt);
 int check_jwt(char* jwt);
 void http_send_jwt_redirect(SSL* ssl, const char* jwt, const char* location);
 int http_extract_jwt_cookie(const char* headers, char* out, size_t out_sz);
+
+typedef struct {
+	char uname[256];
+	int has_access;
+	long exp;
+} s_jwt;
+
+void http_send_access_denied(SSL* ssl);
+int decode_jwt(const char* jwt, s_jwt* claims);

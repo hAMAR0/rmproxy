@@ -239,74 +239,6 @@ int get_mac_part(char* input, char* min, char* max) {
 	return 0;
 }
 
-void change_identity(char* uname, char* fqdn, SSL *ssl, char* clienthost, char* jwt_tok) {
-	char* mac_str_user = get_sssd_attr(uname, "x-ald-user-mac");
-	char mac_str_host[32];
-
-	char host_srv_fqdn[256] = {0};
-	strcpy(host_srv_fqdn, cfg.dc_url);
-	ldap_get_host_mac(host_srv_fqdn, mac_str_host);
-
-	char mac_str_userhost[32];
-	ldap_get_host_mac(clienthost, mac_str_userhost);
-
-	//TODO: ldap_get_host_mac() is much slower than getting values from sssd cache, USE JWT;
-
-	char mac_str_user_min[16], mac_str_user_max[16], mac_str_host_min[16], mac_str_host_max[16], mac_str_userhost_min[16], mac_str_userhost_max[16];
-	
-	if (get_mac_part(mac_str_user, mac_str_user_min, mac_str_user_max) == 0 || get_mac_part(mac_str_host, mac_str_host_min, mac_str_host_max) == 0 || get_mac_part(mac_str_userhost, mac_str_userhost_min, mac_str_userhost_max) == 0) {
-		error("Could not parse minmax mac");
-	}
-	printf("user %s\nhost %s\nuserhost %s\n", mac_str_user, mac_str_host, mac_str_userhost);
-
-	mac_t userhost_mac = mac_init(MAC_TYPE_SUBJECT); // user machine fqdn
-	mac_t user_mac = mac_init(MAC_TYPE_SUBJECT); // user
-	mac_t host_mac = mac_init(MAC_TYPE_SUBJECT); // requested destination fqdn
-	
-	if (mac_from_text(user_mac, mac_str_user_min) < 0 || mac_from_text(host_mac, mac_str_host_min) < 0 || mac_from_text(userhost_mac, mac_str_userhost_min)) error ("Could not set user mac");
-
-	if(mac_cmp(user_mac, userhost_mac) != 0) {
-		printf("User tried accessing website with MAC level stronger/lower than the logged in machine\n");
-		return;
-	}
-
-	pid_t pid = getpid();
-	switch(mac_cmp(user_mac, host_mac)){
-		case -2:
-			mac_free(user_mac);
-			mac_free(host_mac);
-			error("mac labels are not comparable");
-			break;
-		case -1:
-			mac_free(user_mac);
-			mac_free(host_mac);
-			printf("user mac < host mac\n");
-			break;
-		case 0:
-			printf("user mac = host mac\n");
-			if (mac_set_pid(pid, user_mac) != 0) {
-				error ("Could not set mac to child process");
-			}
-			handle_client(ssl, prefetch_req, prefetch_len);
-			mac_free(user_mac);
-			mac_free(host_mac);
-
-			break;
-		case 1:
-			printf("user mac > host mac\n");
-			handle_client(ssl, prefetch_req, prefetch_len);
-			mac_free(user_mac);
-			mac_free(host_mac);
-			break;
-		default:
-			mac_free(user_mac);
-			mac_free(host_mac);
-			printf("some other error");
-			break;
-	}
-}
-
-
 int payload_gen(char* uname, char* payload, char* client_hostname, char* target_fqdn) {
 	char* mac_str_user = get_sssd_attr(uname, "x-ald-user-mac");
 	char mac_str_host[32];
@@ -478,6 +410,7 @@ int main () {
 				char fqdn[512];
 				char jwt[1024];
 				char payload[1024];
+				s_jwt jwt_claim;
 				
 				int auth = token_validation(ssl, uname, fqdn, jwt);
 				switch (auth) {
@@ -485,7 +418,7 @@ int main () {
 						error("faild to kerb auth");
 						break;
 					case 1:
-						printf("generating jwt");
+						printf("generating jwt\n");
 						payload_gen(uname, payload, clienthost, fqdn);
 						if (create_jwt(payload, jwt)) {
 							http_send_jwt_redirect(ssl, jwt, "/");
@@ -496,9 +429,10 @@ int main () {
 						exit(1);
 						break;
 					case 2:
-						printf("already had jwt");
-						handle_client(ssl, prefetch_req, prefetch_len);
-						//change_identity(uname, fqdn, ssl, clienthost, jwt);
+						printf("fetched jwt correctly\n");
+						int n = decode_jwt(jwt, &jwt_claim);
+						if (jwt_claim.has_access==1) handle_client(ssl, prefetch_req, prefetch_len);
+						else http_send_access_denied(ssl);
 						break;
 					default:
 						break;

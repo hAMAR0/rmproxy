@@ -269,3 +269,65 @@ void http_send_jwt_redirect(SSL* ssl, const char* jwt, const char* location) {
 		location, jwt);
 	if (n > 0) SSL_write(ssl, response, n);
 }
+
+// 1 - valid, 0 - not safe, -1 - expired, -2 - decode error
+int decode_jwt(const char* jwt, s_jwt* claims) {
+	if (!jwt || !claims) return -2;
+
+	char header[128], b64_payload[256], signature[256];
+	if (sscanf(jwt, "%127[^.].%255[^.].%255[^\n]", header, b64_payload, signature) != 3) return -2;
+
+	if (!check_jwt((char*)jwt)) return 0;
+
+	char std_b64[256];
+	int b64_len = (int)strlen(b64_payload);
+	unwrapper(b64_payload, b64_len, std_b64, (int)sizeof(std_b64));
+
+	char json_buf[512];
+	int json_len = d_b64(std_b64, json_buf, sizeof(json_buf) - 1);
+	if (json_len <= 0)
+		return -2;
+	json_buf[json_len] = '\0';
+
+	memset(claims, 0, sizeof(*claims));
+
+	const char* p = strstr(json_buf, "\"uname\"");
+	if (!p) return -2;
+	p = strchr(p + 7, '"');
+	if (!p) return -2;
+	p++;
+	const char* end = strchr(p, '"');
+	if (!end) return -2;
+	size_t uname_len = (size_t)(end - p);
+	if (uname_len >= sizeof(claims->uname)) return -2;
+	memcpy(claims->uname, p, uname_len);
+	claims->uname[uname_len] = '\0';
+
+	p = strstr(json_buf, "\"has_access\"");
+	if (!p) return -2;
+	p = strchr(p + 12, ':');
+	if (!p) return -2;
+	while (*p == ':' || *p == ' ') p++;
+	claims->has_access = (*p == '1') ? 1 : 0;
+
+	p = strstr(json_buf, "\"exp\"");
+	if (!p) return -2;
+	p = strchr(p + 5, ':');
+	if (!p) return -2;
+	while (*p == ':' || *p == ' ') p++;
+	claims->exp = strtol(p, NULL, 10);
+
+	if (claims->exp < (long)time(NULL)) return -1;
+
+	return 1;
+}
+
+void http_send_access_denied(SSL* ssl) {
+	const char* response =
+		"HTTP/1.1 403 Forbidden\r\n"
+		"Content-Type: text/plain\r\n"
+		"Content-Length: 9\r\n"
+		"Connection: close\r\n\r\n"
+		"Forbidden";
+	SSL_write(ssl, response, strlen(response));
+}
