@@ -40,6 +40,7 @@ int parse(const char *filename, pcfg* cfg) {
 			else if (strcmp(name, "t_port") == 0) cfg->t_port = atoi(value);
 			else if (strcmp(name, "t_addr") == 0) cfg->t_addr = strdup(value);
 			else if (strcmp(name, "dc_url") == 0) cfg->dc_url = strdup(value);
+			else if (strcmp(name, "cert_path") == 0) cfg->cert_path = strdup(value);
 		}
 	}
 

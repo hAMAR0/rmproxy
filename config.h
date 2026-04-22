@@ -5,6 +5,7 @@ typedef struct {
 	int t_port;
 	char *t_addr;
 	char *dc_url;
+	char *cert_path;
 } pcfg;
 
 extern pcfg cfg;

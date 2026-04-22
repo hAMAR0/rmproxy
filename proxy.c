@@ -335,16 +335,17 @@ int main () {
 	opts |= SSL_OP_CIPHER_SERVER_PREFERENCE;
 	SSL_CTX_set_options(ctx, opts);
 
-	//TODO: move cert path to cfg
-	if (SSL_CTX_use_certificate_file(ctx, "./cert/cert.pem", SSL_FILETYPE_PEM) < 1 || SSL_CTX_use_PrivateKey_file(ctx, "./cert/key.pem", SSL_FILETYPE_PEM) < 1) {
+	if (parse("./mrp.conf", &cfg) != 0) error("Could not load config, shutting down");
+
+	char cert_file[256], key_file[256];
+	snprintf(cert_file, sizeof(cert_file), "%s%s", cfg.cert_path, "cert.pem");
+	snprintf(key_file, sizeof(cert_file), "%s%s", cfg.cert_path, "key.pem");
+	if (SSL_CTX_use_certificate_file(ctx, cert_file, SSL_FILETYPE_PEM) < 1 || SSL_CTX_use_PrivateKey_file(ctx, key_file, SSL_FILETYPE_PEM) < 1) {
 		SSL_CTX_free(ctx);
 		error("Failed to load certificates");
 	}
 
-
-	if (parse("./mrp.conf", &cfg) != 0) error("Could not load config, shutting down");
-
-	// killing every child when they exit via sigaction
+// killing every child when they exit via sigaction
 	struct sigaction sa = {
 		.sa_handler = handle_sigchld,
 		.sa_flags = SA_RESTART
