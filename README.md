@@ -1,5 +1,7 @@
 # Обратный прокси сервер с поддержкой мандатного управления доступом на Astra Linux.
 
+[Документация](docs/rmproxy_docs.md)
+
 ## Зависимости
 - libsystemd-dev
 - parsec-dev
@@ -23,9 +25,14 @@
 - `ipa permission-add "Read host mac" --type=host --right={read,compare,search} --attrs=x-ald-host-mac --bindtype=all`
 - `sudo execaps -c 0x00004 env KRB5_KTNAME=/var/lib/ipa/gssproxy/http.keytab ./proxy` или дайте пользователю привилегии parsec и запустите без execaps
 
+## Конфигурация
+- Конфигурация осуществляется путем редактирования файла **mrp.conf**
+
 ---
 
 # A reverse proxy with mandatory access control support (MAC) for Astra Linux
+
+[Documentation](docs/rmproxy_docs.md)
 
 ## Dependencies
 - libsystemd-dev
@@ -49,3 +56,6 @@
 - `ipa host-mod astraipa.domain.net --addattr=x-ald-host-mac="2:0x2:2:0x2"` (--setattr to change attribute)
 - `ipa permission-add "Read host mac" --type=host --right={read,compare,search} --attrs=x-ald-host-mac --bindtype=all`
 - `sudo execaps -c 0x00004 env KRB5_KTNAME=/var/lib/ipa/gssproxy/http.keytab ./proxy` or give user parsec privileges & run without execaps
+
+## Configuration
+- Configure reverse proxy by editing the **mrp.conf** file
