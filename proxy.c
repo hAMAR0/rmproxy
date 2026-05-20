@@ -130,8 +130,7 @@ int token_validation(SSL *ssl, char* out_name, char* fqdn, char* jwt_tok) {
 				break;
 			}
 
-
-			strncpy(out_name, (char*)name.value, sizeof(out_name));
+			strcpy(out_name, (char*)name.value);
 			out_name[(int)name.length] = '\0';
 
 			if (req_len > sizeof(prefetch_req)) req_len = sizeof(prefetch_req);
@@ -280,7 +279,7 @@ int payload_gen(char* uname, char* payload, char* client_hostname, char* target_
 			mac_free(host_mac);
 			break;
 	}
-
+	
 	char has_access = 0;
 
 	switch(mac_cmp(min_user_mac, host_mac)){
@@ -306,7 +305,7 @@ int payload_gen(char* uname, char* payload, char* client_hostname, char* target_
 			break;
 		default:
 			mac_free(min_user_mac);
-			mac_free(host_mac);
+		mac_free(host_mac);
 			break;
 	}
 	long exp = time(NULL) + 12*3600;

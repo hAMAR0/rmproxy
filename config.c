@@ -41,6 +41,7 @@ int parse(const char *filename, pcfg* cfg) {
 			else if (strcmp(name, "t_addr") == 0) cfg->t_addr = strdup(value);
 			else if (strcmp(name, "dc_url") == 0) cfg->dc_url = strdup(value);
 			else if (strcmp(name, "cert_path") == 0) cfg->cert_path = strdup(value);
+			else if (strcmp(name, "jwt_secret") == 0) cfg->jwt_secret = strdup(value);
 		}
 	}
 
