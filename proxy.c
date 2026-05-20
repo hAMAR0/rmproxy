@@ -130,7 +130,8 @@ int token_validation(SSL *ssl, char* out_name, char* fqdn, char* jwt_tok) {
 				break;
 			}
 
-			strcpy(out_name, (char*)name.value);
+
+			strncpy(out_name, (char*)name.value, sizeof(out_name));
 			out_name[(int)name.length] = '\0';
 
 			if (req_len > sizeof(prefetch_req)) req_len = sizeof(prefetch_req);
@@ -276,7 +277,7 @@ int payload_gen(char* uname, char* payload, char* client_hostname, char* target_
 		default:
 			mac_free(userhost_mac);
 			mac_free(user_mac);
-			mac_free(userhost_mac);
+			mac_free(host_mac);
 			break;
 	}
 
@@ -339,7 +340,7 @@ int main () {
 
 	char cert_file[256], key_file[256];
 	snprintf(cert_file, sizeof(cert_file), "%s%s", cfg.cert_path, "cert.pem");
-	snprintf(key_file, sizeof(cert_file), "%s%s", cfg.cert_path, "key.pem");
+	snprintf(key_file, sizeof(key_file), "%s%s", cfg.cert_path, "key.pem");
 	if (SSL_CTX_use_certificate_file(ctx, cert_file, SSL_FILETYPE_PEM) < 1 || SSL_CTX_use_PrivateKey_file(ctx, key_file, SSL_FILETYPE_PEM) < 1) {
 		SSL_CTX_free(ctx);
 		error("Failed to load certificates");
@@ -427,7 +428,6 @@ int main () {
 						SSL_shutdown(ssl);
 						SSL_free(ssl);
 						close(client_sockfd);
-						exit(1);
 						break;
 					case 2:
 						printf("fetched jwt correctly\n");
